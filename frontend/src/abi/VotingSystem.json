@@ -1,0 +1,122 @@
+[
+  {
+    "inputs": [],
+    "stateMutability": "nonpayable",
+    "type": "constructor"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "name": "proposalId", "type": "uint256" },
+      { "indexed": true, "name": "creator", "type": "address" },
+      { "indexed": false, "name": "title", "type": "string" },
+      { "indexed": false, "name": "deadline", "type": "uint256" }
+    ],
+    "name": "ProposalCreated",
+    "type": "event"
+  },
+  {
+    "anonymous": false,
+    "inputs": [
+      { "indexed": true, "name": "proposalId", "type": "uint256" },
+      { "indexed": true, "name": "voter", "type": "address" },
+      { "indexed": false, "name": "support", "type": "bool" }
+    ],
+    "name": "Voted",
+    "type": "event"
+  },
+  {
+    "inputs": [
+      { "name": "title", "type": "string" },
+      { "name": "description", "type": "string" },
+      { "name": "durationInMinutes", "type": "uint256" }
+    ],
+    "name": "createProposal",
+    "outputs": [],
+    "stateMutability": "payable",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "name": "proposalId", "type": "uint256" },
+      { "name": "support", "type": "bool" }
+    ],
+    "name": "vote",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "name": "proposalId", "type": "uint256" }],
+    "name": "getProposal",
+    "outputs": [
+      {
+        "components": [
+          { "name": "title", "type": "string" },
+          { "name": "description", "type": "string" },
+          { "name": "creator", "type": "address" },
+          { "name": "yesVotes", "type": "uint256" },
+          { "name": "noVotes", "type": "uint256" },
+          { "name": "deadline", "type": "uint256" },
+          { "name": "exists", "type": "bool" }
+        ],
+        "name": "",
+        "type": "tuple"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "getAllProposals",
+    "outputs": [
+      {
+        "components": [
+          { "name": "title", "type": "string" },
+          { "name": "description", "type": "string" },
+          { "name": "creator", "type": "address" },
+          { "name": "yesVotes", "type": "uint256" },
+          { "name": "noVotes", "type": "uint256" },
+          { "name": "deadline", "type": "uint256" },
+          { "name": "exists", "type": "bool" }
+        ],
+        "name": "",
+        "type": "tuple[]"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      { "name": "proposalId", "type": "uint256" },
+      { "name": "voter", "type": "address" }
+    ],
+    "name": "hasVoted",
+    "outputs": [{ "name": "", "type": "bool" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "withdraw",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "owner",
+    "outputs": [{ "name": "", "type": "address" }],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [],
+    "name": "proposalCount",
+    "outputs": [{ "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  }
+]
