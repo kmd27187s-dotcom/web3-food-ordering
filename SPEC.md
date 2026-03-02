@@ -421,6 +421,163 @@ npx vercel deploy --prod ./dist --yes
 
 ---
 
+## 作業 TODO 項目詳述
+
+本專案已預留以下 TODO，學生需要補齊實作。每個 TODO 在程式碼中都有詳細的需求註解。
+
+### TODO 1：合約 — `vote()` 函式
+
+**檔案：** `contracts/contracts/VotingSystem.sol`
+
+**邏輯概述：**
+
+```
+vote(proposalId, support)
+  │
+  ├── 1. 取得提案：Proposal storage p = proposals[proposalId]
+  ├── 2. 檢查提案存在：require(p.exists)
+  ├── 3. 檢查未過期：require(block.timestamp < p.deadline)
+  ├── 4. 檢查未重複投票：require(!voted[proposalId][msg.sender])
+  ├── 5. 標記已投票：voted[proposalId][msg.sender] = true
+  ├── 6. 更新票數：support ? p.yesVotes++ : p.noVotes++
+  └── 7. 發出事件：emit Voted(proposalId, msg.sender, support)
+```
+
+**提示：** 可參考同檔案中 `createProposal()` 的 require + emit 寫法。
+
+---
+
+### TODO 2：合約 — `withdraw()` 函式
+
+**檔案：** `contracts/contracts/VotingSystem.sol`
+
+**邏輯概述：**
+
+```
+withdraw()
+  │
+  ├── 1. 加上 onlyOwner modifier（已定義好，直接使用）
+  └── 2. 轉帳：payable(owner).transfer(address(this).balance)
+```
+
+**提示：** 只需要兩行 — 改函式宣告加 `onlyOwner`，加一行 `transfer`。
+
+---
+
+### TODO 3：Backend — `GetProposal` handler
+
+**檔案：** `backend/handlers/handlers.go`
+
+**邏輯概述：**
+
+```
+GetProposal(w, r)
+  │
+  ├── 1. 取得 URL 參數：idStr := r.PathValue("id")
+  ├── 2. 字串轉數字：id, err := strconv.ParseUint(idStr, 10, 64)
+  │     └── 失敗 → writeError(w, 400, "invalid proposal id")
+  ├── 3. 呼叫鏈上查詢：proposal, err := h.bc.GetProposal(r.Context(), id)
+  │     └── 失敗 → writeError(w, 500, err.Error())
+  └── 4. 回傳 JSON：writeJSON(w, 200, proposal)
+```
+
+**提示：** 可參考同檔案中 `GetAllProposals` 的寫法，差別是多了路由參數解析。需要 `import "strconv"`。
+
+---
+
+### TODO 4：Backend — `HasVoted` handler
+
+**檔案：** `backend/handlers/handlers.go`
+
+**邏輯概述：**
+
+```
+HasVoted(w, r)
+  │
+  ├── 1. 取得 URL 參數：idStr := r.PathValue("id")
+  ├── 2. 字串轉數字：id, err := strconv.ParseUint(idStr, 10, 64)
+  │     └── 失敗 → writeError(w, 400, "invalid proposal id")
+  ├── 3. 取得 query 參數：voter := r.URL.Query().Get("voter")
+  │     └── 空字串 → writeError(w, 400, "voter address is required")
+  ├── 4. 呼叫鏈上查詢：hasVoted, err := h.bc.HasVoted(r.Context(), id, voter)
+  │     └── 失敗 → writeError(w, 500, err.Error())
+  └── 5. 回傳 JSON：writeJSON(w, 200, map[string]bool{"hasVoted": hasVoted})
+```
+
+**提示：** 結合 `GetProposal` 的路由參數 + query parameter 取值。
+
+---
+
+### TODO 5：Frontend — `useCountdown` hook
+
+**檔案：** `frontend/src/components/ProposalCard.jsx`
+
+**邏輯概述：**
+
+```
+useCountdown(deadline)
+  │
+  ├── 1. state：now = Math.floor(Date.now() / 1000)
+  ├── 2. useEffect：每秒 setInterval 更新 now
+  ├── 3. 計算 remaining = deadline - now
+  ├── 4. remaining <= 0 → return "Ended"
+  └── 5. 格式化：計算 h / m / s → return `${h}h ${m}m ${s}s`
+```
+
+**提示：** `h = Math.floor(remaining / 3600)`，`m = Math.floor((remaining % 3600) / 60)`，`s = remaining % 60`。記得在 useEffect 的 cleanup 中 `clearInterval`。
+
+---
+
+### TODO 6：Frontend — `ProposalCard` 元件
+
+**檔案：** `frontend/src/components/ProposalCard.jsx`
+
+**邏輯概述：**
+
+```
+ProposalCard({ proposal, account, contract, onVote, disabled })
+  │
+  ├── 1. state：hasVoted（boolean）
+  ├── 2. useEffect：呼叫 contract.hasVoted(proposal.id, account) 查詢是否已投票
+  ├── 3. 計算 isEnded = useCountdown 回傳 "Ended"
+  ├── 4. 計算 yesPercent = yesVotes / (yesVotes + noVotes) * 100
+  │
+  └── 5. JSX 結構：
+        ├── proposal-header：標題 + 倒數計時 badge
+        ├── proposal-desc：描述文字
+        ├── proposal-meta：建立者地址（截斷顯示）
+        ├── vote-bar：進度條（bar-track > bar-fill style width）
+        ├── vote-counts：Yes / No 票數
+        ├── vote-actions：（未投票 + 未過期時顯示）
+        │     ├── yes-btn → onVote(proposal.id, true)
+        │     └── no-btn → onVote(proposal.id, false)
+        └── voted-label：（已投票時顯示 "You already voted"）
+```
+
+**提示：** CSS class 都已在 `App.css` 中定義好（`proposal-card`、`active`、`ended`、`vote-bar`、`bar-fill yes`、`yes-btn`、`no-btn` 等）。可參考 `CreateProposal.jsx` 的表單寫法和 `ConnectWallet.jsx` 的條件渲染寫法。
+
+---
+
+### TODO 7：測試 — vote 和 withdraw 測試案例
+
+**檔案：** `contracts/test/VotingSystem.test.js`
+
+| 測試 | 要寫的內容 |
+|------|-----------|
+| should allow voting yes | `voting.connect(user2).vote(0, true)` → 檢查 `yesVotes == 1` |
+| should allow voting no | `voting.connect(user2).vote(0, false)` → 檢查 `noVotes == 1` |
+| should mark voter as voted | 投票後 `voting.hasVoted(0, user2.address)` → `true` |
+| should revert on double voting | 同一地址投兩次 → `revertedWith("Already voted")` |
+| should revert if not exist | `vote(99, true)` → `revertedWith("Proposal does not exist")` |
+| should revert if ended | `time.increase(3601)` 後投票 → `revertedWith("Voting has ended")` |
+| should emit Voted event | `expect(...).to.emit(voting, "Voted").withArgs(0, addr, true)` |
+| owner withdraw | `voting.connect(owner).withdraw()` → 不 revert |
+| non-owner withdraw | `voting.connect(user1).withdraw()` → `revertedWith("Not owner")` |
+
+**提示：** 可參考同檔案中 `createProposal` 的測試寫法，結構完全一樣。
+
+---
+
 ## 出題建議（給教師）
 
 ### 難度等級
