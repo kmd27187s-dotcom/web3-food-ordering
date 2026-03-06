@@ -308,8 +308,7 @@ npx vercel deploy --prod ./dist --yes
 
 ---
 
-## Go Backend API 端點
-
+## Go Backend API 
 | Method | Path | 說明 | 回傳範例 |
 |--------|------|------|----------|
 | GET | `/api/health` | 健康檢查 | `{"status":"ok"}` |
