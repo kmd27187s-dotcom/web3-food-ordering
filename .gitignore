@@ -1,11 +1,22 @@
+# dependencies
 node_modules/
+
+# next.js
 .next/
-.DS_Store
+out/
+
+# build artifacts
 bin/
 dist/
 build/
+coverage/
+*.log
+
+# local binaries / databases
 backend/backend
 backend/mealvote.db
+
+# environment files
 .env
 .env.local
 .env.development.local
@@ -14,3 +25,12 @@ backend/mealvote.db
 .env.deployment
 apps/web/.env.deployment
 backend/.env.deployment
+
+# editor / os
+.DS_Store
+.idea/
+.vscode/
+
+# misc
+tmp/
+*.pid
