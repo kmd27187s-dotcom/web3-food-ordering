@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MealVote Legacy Login</title>
+  </head>
+  <body style="margin:0;font-family:'Noto Sans TC',sans-serif;background:linear-gradient(135deg,#f6f0e6 0%,#efe4d0 100%);color:#2b1e15;">
+    <main style="min-height:100vh;display:grid;place-items:center;padding:24px;">
+      <section style="max-width:760px;background:rgba(255,252,246,.92);border:1px solid rgba(83,60,39,.15);border-radius:28px;padding:32px;box-shadow:0 20px 50px rgba(75,48,24,.1);">
+        <span style="display:inline-flex;padding:6px 12px;border-radius:999px;background:#ede2cf;color:#7a6654;font-size:12px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;">Legacy frontend</span>
+        <h1 style="margin:18px 0 12px;font-size:32px;line-height:1.2;">舊版登入頁已退出主流程</h1>
+        <p style="margin:0 0 14px;line-height:1.8;color:#6f5b49;">
+          MealVote 現在的主要前端已搬到 <strong>Next.js + wagmi + viem</strong> 架構。請改用新的 `apps/web` 前端入口進行登入、會員、治理、排行榜與紀錄操作。
+        </p>
+        <p style="margin:0 0 24px;line-height:1.8;color:#6f5b49;">
+          如果你是本機開發，請先執行 <code>npm run web:dev</code>，再打開新的登入頁。
+        </p>
+        <div style="display:flex;flex-wrap:wrap;gap:12px;">
+          <a href="http://localhost:3000/login" style="display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:16px;background:#2b1e15;color:#fff8f0;text-decoration:none;font-weight:700;">前往新登入頁</a>
+          <a href="http://localhost:3000" style="display:inline-flex;align-items:center;justify-content:center;padding:14px 20px;border-radius:16px;border:1px solid rgba(83,60,39,.2);color:#2b1e15;text-decoration:none;font-weight:700;background:#fff8f0;">前往新首頁</a>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

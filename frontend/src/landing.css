@@ -1,0 +1,1130 @@
+/* ── CSS Custom Properties ─────────────────────────────── */
+:root {
+  --bg: #f5f1e8;
+  --paper: rgba(255, 252, 246, 0.88);
+  --line: rgba(83, 60, 39, 0.15);
+  --ink: #2b1e15;
+  --muted: #7a6654;
+  --accent: #bf5d36;
+  --accent-soft: #f1c7a9;
+  --green: #3d8a5c;
+  --shadow: 0 8px 32px rgba(75, 48, 24, 0.1);
+}
+
+/* ── Resets ─────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  min-height: 100vh;
+  color: var(--ink);
+  background: linear-gradient(135deg, #faf7f2 0%, #f0ebe0 100%);
+  font-family: "Noto Sans TC", sans-serif;
+  font-size: 1rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+h1, h2, h3 {
+  font-family: "Manrope", sans-serif;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+h1 {
+  font-size: clamp(2rem, 5vw, 3.25rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
+
+h2 {
+  font-size: clamp(1.5rem, 3vw, 2.25rem);
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+/* ── Buttons ─────────────────────────────────────────────── */
+.lp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 11px 26px;
+  border-radius: 10px;
+  font-family: "Manrope", sans-serif;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: background 150ms, color 150ms, box-shadow 150ms, transform 150ms, opacity 150ms;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.lp-btn:hover {
+  transform: translateY(-1px);
+}
+
+.lp-btn:active {
+  transform: translateY(0);
+}
+
+.lp-btn-primary {
+  background: var(--ink);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(43, 30, 21, 0.18);
+}
+
+.lp-btn-primary:hover {
+  background: #3d2d22;
+  box-shadow: 0 4px 16px rgba(43, 30, 21, 0.22);
+}
+
+.lp-btn-outline {
+  background: transparent;
+  color: var(--ink);
+  border: 1.5px solid rgba(83, 60, 39, 0.35);
+}
+
+.lp-btn-outline:hover {
+  background: rgba(83, 60, 39, 0.06);
+  border-color: rgba(83, 60, 39, 0.5);
+}
+
+.lp-btn-full {
+  width: 100%;
+}
+
+/* ── Section layout helper ──────────────────────────────── */
+.lp-section-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+/* ── Sticky Nav ─────────────────────────────────────────── */
+.lp-nav {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  height: 56px;
+  background: rgba(250, 247, 242, 0.88);
+  border-bottom: 1px solid var(--line);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  transition: background 150ms;
+}
+
+.lp-nav-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.lp-logo {
+  font-family: "Manrope", sans-serif;
+  font-weight: 800;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.lp-logo-chain {
+  font-size: 0.85em;
+  opacity: 0.65;
+}
+
+.lp-nav-links {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.lp-nav-links a {
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 500;
+  padding: 6px 14px;
+  border-radius: 999px;
+  transition: background 150ms, color 150ms;
+  text-decoration: none;
+}
+
+.lp-nav-links a:hover {
+  background: rgba(83, 60, 39, 0.07);
+  color: var(--ink);
+}
+
+.lp-nav-auth {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* Nav auth button overrides for pill shape */
+.lp-nav-auth .lp-btn {
+  padding: 7px 18px;
+  font-size: 0.85rem;
+  border-radius: 999px;
+}
+
+/* Wallet chip (injected by landing.js) */
+.lp-wallet-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(83, 60, 39, 0.08);
+  border: 1px solid var(--line);
+  font-size: 0.8rem;
+  font-family: "Manrope", monospace;
+  color: var(--muted);
+}
+
+/* Token badge (injected by landing.js) */
+.lp-token-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.78rem;
+  font-weight: 700;
+  font-family: "Manrope", sans-serif;
+}
+
+/* ── Hero ───────────────────────────────────────────────── */
+.lp-hero {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  padding-top: 56px; /* nav height */
+}
+
+.lp-hero-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 80px 24px 64px;
+  display: flex;
+  align-items: center;
+  gap: 64px;
+  width: 100%;
+}
+
+.lp-hero-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.lp-hero-text h1 {
+  margin-bottom: 20px;
+  color: var(--ink);
+}
+
+.lp-hero-desc {
+  font-size: 1.15rem;
+  color: var(--ink);
+  font-weight: 500;
+  margin-bottom: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lp-hero-sub {
+  font-size: 0.88rem;
+  color: var(--muted);
+  font-weight: 400;
+  font-family: "Manrope", sans-serif;
+  letter-spacing: 0.01em;
+}
+
+.lp-hero-cta {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* Hero mockup */
+.lp-hero-mockup {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+
+/* ── App Mockup Frame ───────────────────────────────────── */
+.lp-mockup-frame {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: var(--shadow), 0 2px 8px rgba(75, 48, 24, 0.06);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  width: 100%;
+  max-width: 420px;
+}
+
+.lp-mockup-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.lp-mockup-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.lp-mockup-tabs span {
+  padding: 10px 14px;
+  font-size: 0.8rem;
+  font-family: "Manrope", sans-serif;
+  font-weight: 500;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: color 150ms, border-color 150ms;
+  flex-shrink: 0;
+}
+
+.lp-mockup-tabs span.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  font-weight: 700;
+}
+
+.lp-mockup-tabs span:hover:not(.active) {
+  color: var(--ink);
+}
+
+.lp-mockup-body {
+  padding: 20px;
+}
+
+.lp-mockup-title {
+  font-family: "Manrope", sans-serif;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--ink);
+  margin-bottom: 16px;
+}
+
+.lp-mockup-option {
+  margin-bottom: 14px;
+}
+
+.lp-mockup-option-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.lp-mockup-option-icon {
+  font-size: 1.1rem;
+}
+
+.lp-mockup-option-name {
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.lp-mockup-option-pct {
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-family: "Manrope", sans-serif;
+  color: var(--accent);
+}
+
+.lp-mockup-bar {
+  height: 8px;
+  background: rgba(83, 60, 39, 0.1);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.lp-mockup-bar-fill {
+  height: 100%;
+  width: var(--pct, 0%);
+  background: linear-gradient(90deg, var(--accent) 0%, #d97241 100%);
+  border-radius: 999px;
+  animation: bar-grow 1s cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.lp-mockup-bar-fill--alt {
+  background: linear-gradient(90deg, var(--muted) 0%, #a08070 100%);
+}
+
+@keyframes bar-grow {
+  from { width: 0; }
+  to { width: var(--pct, 0%); }
+}
+
+.lp-mockup-voters {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 16px;
+}
+
+.lp-voter-avatar {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: "Manrope", sans-serif;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #fff;
+}
+
+.lp-voter-more {
+  background: rgba(83, 60, 39, 0.1);
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+/* ── Features ───────────────────────────────────────────── */
+.lp-features {
+  padding: 96px 0;
+}
+
+.lp-features h2 {
+  text-align: center;
+  margin-bottom: 10px;
+}
+
+.lp-section-subtitle {
+  text-align: center;
+  color: var(--muted);
+  font-size: 1rem;
+  margin-bottom: 52px;
+}
+
+.lp-features-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+.lp-feature-card {
+  background: rgba(255, 252, 246, 0.9);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 28px 24px;
+  transition: box-shadow 150ms, transform 150ms;
+}
+
+.lp-feature-card:hover {
+  box-shadow: var(--shadow);
+  transform: translateY(-3px);
+}
+
+.lp-feature-icon {
+  margin-bottom: 14px;
+  color: var(--accent);
+}
+
+.lp-feature-icon svg {
+  display: block;
+}
+
+.lp-feature-card h3 {
+  margin-bottom: 8px;
+  font-size: 1.05rem;
+}
+
+.lp-feature-card p {
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* ── How It Works ───────────────────────────────────────── */
+.lp-how {
+  padding: 80px 0;
+  background: rgba(255, 252, 246, 0.5);
+}
+
+.lp-how h2 {
+  text-align: center;
+  margin-bottom: 48px;
+}
+
+.lp-how-steps {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+  flex-wrap: nowrap;
+}
+
+.lp-how-step {
+  flex: 1;
+  max-width: 200px;
+  text-align: center;
+  padding: 0 16px;
+}
+
+.lp-how-step-num {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: "Manrope", sans-serif;
+  font-weight: 800;
+  font-size: 1.2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 14px;
+}
+
+.lp-how-step h3 {
+  margin-bottom: 6px;
+  font-size: 1rem;
+}
+
+.lp-how-step p {
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.lp-how-arrow {
+  font-size: 1.5rem;
+  color: var(--accent-soft);
+  font-weight: 700;
+  padding-top: 12px;
+  flex-shrink: 0;
+  align-self: flex-start;
+}
+
+/* ── Blockchain Explainer ───────────────────────────────── */
+.lp-blockchain {
+  padding: 96px 0;
+}
+
+.lp-blockchain-inner {
+  display: flex;
+  gap: 80px;
+  align-items: flex-start;
+}
+
+.lp-blockchain-left {
+  flex: 1;
+  min-width: 0;
+}
+
+.lp-blockchain-left h2 {
+  margin-bottom: 16px;
+}
+
+.lp-blockchain-left p {
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.lp-blockchain-right {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.lp-blockchain-point {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.lp-blockchain-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.lp-blockchain-point h3 {
+  margin-bottom: 4px;
+  font-size: 1rem;
+}
+
+.lp-blockchain-point p {
+  color: var(--muted);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+/* ── Social Proof ──────────────────────────────────────── */
+.lp-proof {
+  padding: 64px 0;
+  background: var(--ink);
+  color: #fff9f1;
+}
+
+.lp-proof-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 24px;
+  text-align: center;
+}
+
+.lp-proof-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lp-proof-num {
+  font-family: "Manrope", sans-serif;
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: var(--accent-soft);
+}
+
+.lp-proof-label {
+  font-size: 0.85rem;
+  opacity: 0.75;
+}
+
+/* ── Registration Form ──────────────────────────────────── */
+.lp-register {
+  padding: 96px 0;
+  background: rgba(255, 252, 246, 0.5);
+}
+
+.lp-register h2 {
+  text-align: center;
+  margin-bottom: 36px;
+}
+
+.lp-register-inner {
+  max-width: 440px;
+}
+
+.lp-form {
+  background: rgba(255, 252, 246, 0.95);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.lp-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lp-form-group label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--ink);
+  font-family: "Manrope", sans-serif;
+}
+
+.lp-form-group input {
+  padding: 10px 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--ink);
+  font-size: 0.95rem;
+  transition: border-color 150ms, box-shadow 150ms;
+  outline: none;
+}
+
+.lp-form-group input::placeholder {
+  color: rgba(122, 102, 84, 0.5);
+}
+
+.lp-form-group input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(191, 93, 54, 0.12);
+}
+
+/* Flash messages */
+.lp-flash {
+  padding: 10px 14px;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.lp-flash:not([hidden]) {
+  display: block;
+}
+
+.lp-flash.lp-flash-error {
+  background: var(--accent);
+  color: #fff;
+}
+
+.lp-flash.lp-flash-success {
+  background: var(--green);
+  color: #fff;
+}
+
+/* Default flash appearance — JS adds error/success classes */
+#register-flash:not([hidden]),
+#login-flash:not([hidden]) {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid rgba(191, 93, 54, 0.2);
+}
+
+.lp-form-alt {
+  text-align: center;
+  font-size: 0.875rem;
+  color: var(--muted);
+}
+
+.lp-form-alt a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: opacity 150ms;
+}
+
+.lp-form-alt a:hover {
+  opacity: 0.8;
+}
+
+/* ── Login Modal ────────────────────────────────────────── */
+.lp-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 300;
+  background: rgba(43, 30, 21, 0.45);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.lp-modal-overlay[hidden] {
+  display: none;
+}
+
+.lp-modal {
+  background: rgba(255, 252, 246, 0.98);
+  border: 1px solid var(--line);
+  border-radius: 20px;
+  padding: 36px 32px 32px;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 20px 60px rgba(43, 30, 21, 0.2);
+  position: relative;
+}
+
+.lp-modal h2 {
+  margin-bottom: 24px;
+  font-size: 1.5rem;
+}
+
+.lp-modal-close {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(83, 60, 39, 0.08);
+  border: none;
+  color: var(--muted);
+  font-size: 1.2rem;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 150ms, color 150ms;
+}
+
+.lp-modal-close:hover {
+  background: rgba(83, 60, 39, 0.15);
+  color: var(--ink);
+}
+
+/* Modal form inherits .lp-form styles */
+.lp-modal .lp-form {
+  border: none;
+  padding: 0;
+  box-shadow: none;
+  background: transparent;
+}
+
+/* ── Footer ─────────────────────────────────────────────── */
+.lp-footer {
+  background: var(--ink);
+  color: rgba(255, 252, 246, 0.85);
+  padding: 48px 0 36px;
+}
+
+.lp-footer-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 48px;
+  align-items: start;
+}
+
+.lp-footer-brand .lp-logo {
+  color: rgba(255, 252, 246, 0.95);
+  font-size: 1.05rem;
+  margin-bottom: 8px;
+  display: inline-flex;
+}
+
+.lp-footer-brand p {
+  font-size: 0.875rem;
+  color: rgba(255, 252, 246, 0.5);
+  margin-top: 8px;
+}
+
+.lp-footer-links {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.lp-footer-links a {
+  color: rgba(255, 252, 246, 0.65);
+  font-size: 0.875rem;
+  text-decoration: none;
+  transition: color 150ms;
+}
+
+.lp-footer-links a:hover {
+  color: rgba(255, 252, 246, 0.95);
+}
+
+.lp-footer-lang {
+  display: flex;
+  gap: 6px;
+}
+
+.lp-lang-btn {
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1.5px solid rgba(255, 252, 246, 0.2);
+  background: transparent;
+  color: rgba(255, 252, 246, 0.55);
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: "Manrope", sans-serif;
+  cursor: pointer;
+  transition: background 150ms, color 150ms, border-color 150ms;
+}
+
+.lp-lang-btn:hover {
+  background: rgba(255, 252, 246, 0.08);
+  color: rgba(255, 252, 246, 0.85);
+}
+
+.lp-lang-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  cursor: pointer;
+}
+
+.lp-lang-btn.active {
+  background: rgba(255, 252, 246, 0.12);
+  color: rgba(255, 252, 246, 0.95);
+  border-color: rgba(255, 252, 246, 0.4);
+}
+
+/* ── Responsive: Tablet (≤1024px) ───────────────────────── */
+@media (max-width: 1024px) {
+  .lp-hero-inner {
+    flex-direction: column;
+    gap: 48px;
+    padding: 72px 24px 56px;
+    text-align: center;
+    min-height: calc(100vh - 56px);
+    justify-content: center;
+  }
+
+  .lp-hero-text {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .lp-hero-cta {
+    justify-content: center;
+  }
+
+  .lp-hero-mockup {
+    width: 100%;
+  }
+
+  .lp-mockup-frame {
+    max-width: 480px;
+  }
+
+  .lp-features-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .lp-blockchain-inner {
+    flex-direction: column;
+    gap: 48px;
+  }
+
+  .lp-proof-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 32px;
+  }
+
+  .lp-footer-inner {
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: auto auto;
+  }
+
+  .lp-footer-brand {
+    grid-column: 1 / -1;
+  }
+}
+
+/* ── Responsive: Mobile (≤768px) ────────────────────────── */
+@media (max-width: 768px) {
+  .lp-nav-links {
+    display: none;
+  }
+
+  .lp-nav-inner {
+    gap: 12px;
+  }
+
+  h1 {
+    font-size: 2rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+  }
+
+  .lp-hero {
+    min-height: auto;
+    padding-top: 56px;
+  }
+
+  .lp-hero-inner {
+    padding: 48px 20px 40px;
+    gap: 36px;
+    min-height: auto;
+  }
+
+  .lp-features {
+    padding: 64px 0;
+  }
+
+  .lp-features-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .lp-how {
+    padding: 64px 0;
+  }
+
+  .lp-how-steps {
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .lp-how-step {
+    max-width: 280px;
+    width: 100%;
+  }
+
+  .lp-how-arrow {
+    font-size: 1.2rem;
+    transform: rotate(90deg);
+    display: block;
+    padding-top: 0;
+  }
+
+  .lp-proof-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+  }
+
+  .lp-proof-num {
+    font-size: 1.6rem;
+  }
+
+  .lp-blockchain {
+    padding: 64px 0;
+  }
+
+  .lp-blockchain-inner {
+    gap: 36px;
+  }
+
+  .lp-register {
+    padding: 64px 0;
+  }
+
+  .lp-form {
+    padding: 24px 20px;
+  }
+
+  .lp-modal {
+    padding: 28px 20px 24px;
+  }
+
+  .lp-footer-inner {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .lp-footer-links {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+}
+
+/* ── Small mobile (≤480px) ──────────────────────────────── */
+@media (max-width: 480px) {
+  .lp-section-inner {
+    padding: 0 16px;
+  }
+
+  .lp-nav-inner {
+    padding: 0 16px;
+  }
+
+  .lp-hero-inner {
+    padding: 40px 16px 36px;
+  }
+
+  .lp-hero-cta {
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .lp-hero-cta .lp-btn {
+    width: 100%;
+  }
+
+  .lp-footer-inner {
+    padding: 0 16px;
+  }
+}
+
+/* ── Focus Visible ─────────────────────────────────────── */
+.lp-btn:focus-visible,
+.lp-nav-links a:focus-visible,
+.lp-footer-links a:focus-visible,
+.lp-lang-btn:focus-visible,
+.lp-modal-close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.lp-form input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(191, 93, 54, 0.15);
+}
+
+/* ── Reduced Motion ────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .lp-btn:hover {
+    transform: none;
+  }
+
+  .lp-feature-card:hover {
+    transform: none;
+  }
+}

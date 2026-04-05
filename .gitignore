@@ -1,0 +1,16 @@
+node_modules/
+.next/
+.DS_Store
+bin/
+dist/
+build/
+backend/backend
+backend/mealvote.db
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.deployment
+apps/web/.env.deployment
+backend/.env.deployment

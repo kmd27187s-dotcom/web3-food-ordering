@@ -1,0 +1,22 @@
+{
+  "name": "mealvote",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "compile": "forge build",
+    "test:contracts": "forge test",
+    "deploy:sepolia": "forge script script/DeployMealVote.s.sol:DeployMealVote --rpc-url $SEPOLIA_RPC_URL --broadcast --private-key $DEPLOYER_PRIVATE_KEY",
+    "hardhat:compile": "hardhat compile",
+    "hardhat:deploy:sepolia": "hardhat run scripts/deploy-mealvote.js --network sepolia",
+    "export:contracts": "node scripts/sync-contract-config.js",
+    "web:install": "npm --prefix apps/web install",
+    "web:dev": "npm --prefix apps/web run dev",
+    "web:build": "npm --prefix apps/web run build",
+    "web:start": "npm --prefix apps/web run start"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.0.8",
+    "dotenv": "^16.4.7",
+    "hardhat": "^2.22.17"
+  }
+}
