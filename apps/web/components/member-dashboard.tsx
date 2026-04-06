@@ -229,153 +229,207 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
   }
 
   if (!state.member) {
-    return <div className="rounded-[1.5rem] border border-border bg-card p-8">找不到會員 session，請重新登入。</div>;
+    return <div className="rounded-[1.5rem] border border-orange-100 bg-white p-8">請重新登入。</div>;
   }
 
   return (
-    <div className="space-y-6">
-      <section className="meal-panel grid gap-6 p-8 md:grid-cols-[1fr_0.9fr]">
-        <div className="space-y-5">
-          <div className="meal-section-heading max-w-none">
-            <p className="meal-kicker">Account</p>
-            <h1>{state.member.displayName}</h1>
-            <p className="break-all">{state.member.walletAddress || "尚未綁定錢包地址"}</p>
-          </div>
-          <div className="grid gap-4 md:grid-cols-2">
-            <Stat label="積分" value={`${state.member.points} pts`} />
-            <Stat label="Token" value={`${state.member.tokenBalance}`} />
-            <Stat label="提案券" value={`${state.member.proposalTicketCount} 張`} />
-            <Stat label="待領取" value={`${state.member.claimableProposalTickets} 張`} />
-          </div>
-          <div className="flex flex-wrap gap-3">
-            {state.member.claimableProposalTickets > 0 ? (
-              <Button onClick={handleClaimTickets} disabled={actionPending}>
-                領取提案券
-              </Button>
-            ) : null}
-            <Button
-              variant={state.member.subscriptionActive ? "secondary" : "default"}
-              onClick={handleSubscribe}
-              disabled={actionPending}
-              className={!state.member.subscriptionActive ? "min-w-[16rem]" : undefined}
-            >
-              {state.member.subscriptionActive ? "續訂 99 Token / 30 天" : "支付 99 Token 開通訂閱"}
-            </Button>
-            <Button asChild variant="ghost">
-              <Link href="/records">查看使用紀錄</Link>
-            </Button>
-          </div>
-        </div>
-
-        <div className="meal-glass-card rounded-[1.75rem] p-6">
-          <p className="meal-kicker">Subscription status</p>
-          <div className="mt-5 space-y-4">
-            <Stat label="狀態" value={state.member.subscriptionActive ? "有效" : "未開通"} />
-            <Stat
-              label="到期時間"
-              value={state.member.subscriptionExpiresAt ? new Date(state.member.subscriptionExpiresAt).toLocaleString("zh-TW") : "尚未開通"}
-            />
-            <Stat label="註冊邀請碼" value={state.member.registrationInviteCode || "—"} />
-          </div>
-        </div>
-      </section>
-
+    <div className="space-y-8">
       {state.member.subscriptionActive ? (
         <>
-          <section className="grid gap-6 md:grid-cols-2">
-            <Panel title="建立新群組" description={`目前 ${state.member.tokenBalance} token`}>
-              <div className="space-y-3">
-                <input
-                  className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  value={createName}
-                  onChange={(event) => setCreateName(event.target.value)}
-                  placeholder="例：信義午餐群"
-                />
-                <Button onClick={handleCreateGroup} disabled={actionPending || !createName.trim()}>
-                  建立群組
-                </Button>
-              </div>
-            </Panel>
+          <section className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+            <div className="space-y-8 lg:col-span-5">
+              <section className="relative overflow-hidden rounded-3xl border border-stone-100 bg-white p-8 shadow-xl">
+                <div className="absolute -right-16 -top-16 h-32 w-32 rounded-full bg-primary/5" />
+                <div className="relative flex items-start gap-6">
+                  <div className="flex h-24 w-24 items-center justify-center rounded-2xl bg-orange-100 text-4xl font-bold text-primary shadow-inner">
+                    {displayInitial(state.member.displayName)}
+                  </div>
+                  <div className="min-w-0 flex-1 space-y-2">
+                    <h1 className="text-3xl font-bold text-stone-900">{state.member.displayName}</h1>
+                    <div className="flex items-center gap-2 text-stone-500">
+                      <span className="rounded bg-stone-50 px-2 py-0.5 font-mono text-sm">
+                        {shortAddress(state.member.walletAddress || "")}
+                      </span>
+                    </div>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-secondary px-3 py-1 text-sm font-bold text-primary">
+                      {state.member.subscriptionActive ? "月訂閱有效" : "待開通"}
+                    </div>
+                  </div>
+                </div>
 
-            <Panel title="加入群組" description="輸入邀請碼">
-              <div className="space-y-3">
-                <input
-                  className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  value={inviteCode}
-                  onChange={(event) => setInviteCode(event.target.value)}
-                  placeholder="例：group-1"
-                />
-                <Button onClick={handleJoinGroup} disabled={actionPending || !inviteCode.trim()}>
-                  加入群組
-                </Button>
-              </div>
-            </Panel>
-          </section>
+                <div className="mt-10 grid grid-cols-2 gap-4">
+                  <Stat label="積分" value={`${state.member.points} pts`} />
+                  <Stat label="Token" value={`${state.member.tokenBalance}`} />
+                  <Stat label="提案券" value={`${state.member.proposalTicketCount} 張`} />
+                  <Stat label="待領取" value={`${state.member.claimableProposalTickets} 張`} />
+                </div>
 
-          <Panel title="目前群組" description="群組、成員、切換">
-            {state.activeGroup ? (
-              <div className="space-y-5">
-                <div className="grid gap-5 lg:grid-cols-[0.92fr_1.08fr]">
-                  <div className="meal-soft-panel p-5">
-                    <p className="meal-kicker">Active group</p>
-                    <h2 className="mt-3 font-[var(--font-heading)] text-2xl font-bold tracking-[-0.03em]">{state.activeGroup.name}</h2>
-                    <p className="mt-3 text-sm leading-7 text-muted-foreground">固定邀請碼：{state.activeGroup.inviteCode || "—"}</p>
-                    <div className="mt-5">
+                <div className="mt-6 flex flex-wrap gap-3">
+                  {state.member.claimableProposalTickets > 0 ? (
+                    <Button onClick={handleClaimTickets} disabled={actionPending}>
+                      領取提案券
+                    </Button>
+                  ) : null}
+                  <Button variant="secondary" onClick={handleSubscribe} disabled={actionPending}>
+                    續訂 99 Token / 30 天
+                  </Button>
+                  <Button asChild variant="ghost">
+                    <Link href="/records">查看使用紀錄</Link>
+                  </Button>
+                </div>
+              </section>
+
+              <section className="rounded-3xl border border-stone-100 bg-white p-8 shadow-xl">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="meal-kicker">Subscription</p>
+                    <h2 className="mt-2 text-2xl font-bold text-stone-900">帳戶狀態</h2>
+                  </div>
+                  <div className="rounded-xl bg-primary/5 px-3 py-2 text-sm font-bold text-primary">
+                    {state.member.subscriptionActive ? "Verified" : "Pending"}
+                  </div>
+                </div>
+
+                <div className="mt-6 grid gap-4">
+                  <DetailRow label="到期時間" value={state.member.subscriptionExpiresAt ? new Date(state.member.subscriptionExpiresAt).toLocaleString("zh-TW") : "尚未開通"} />
+                  <DetailRow label="註冊邀請碼" value={state.member.registrationInviteCode || "—"} />
+                </div>
+              </section>
+            </div>
+
+            <div className="space-y-8 lg:col-span-7">
+              <section className="overflow-hidden rounded-3xl border border-stone-100 bg-white shadow-xl">
+                <div className="border-b border-stone-100 bg-stone-50 p-8">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="meal-kicker">Current group</p>
+                      <h2 className="mt-2 text-3xl font-bold text-stone-900">
+                        {state.activeGroup?.name || "尚未加入群組"}
+                      </h2>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = document.getElementById("switch-groups");
+                          target?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }}
+                        className="rounded-full border border-stone-200 bg-white px-4 py-2 text-sm font-bold text-stone-900 transition hover:bg-stone-100"
+                      >
+                        切換群組
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const target = document.getElementById("create-group");
+                          target?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }}
+                        className="rounded-full bg-primary px-4 py-2 text-sm font-bold text-white shadow-md transition hover:scale-[1.02]"
+                      >
+                        建立群組
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-8 p-8">
+                  <div className="grid gap-6 md:grid-cols-2">
+                    <div id="create-group" className="space-y-3">
+                      <p className="meal-kicker">建立群組</p>
+                      <input
+                        className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        value={createName}
+                        onChange={(event) => setCreateName(event.target.value)}
+                        placeholder="例：信義午餐群"
+                      />
+                      <Button onClick={handleCreateGroup} disabled={actionPending || !createName.trim()}>
+                        建立群組
+                      </Button>
+                    </div>
+
+                    <div className="space-y-3">
+                      <p className="meal-kicker">加入群組</p>
+                      <input
+                        className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        value={inviteCode}
+                        onChange={(event) => setInviteCode(event.target.value)}
+                        placeholder="邀請碼"
+                      />
+                      <Button onClick={handleJoinGroup} disabled={actionPending || !inviteCode.trim()}>
+                        加入群組
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-orange-100 bg-orange-50/40 p-6">
+                    <p className="text-sm font-medium text-stone-500">群組邀請碼</p>
+                    <p className="mt-2 text-2xl font-mono font-bold tracking-widest text-primary">
+                      {state.activeGroup?.inviteCode || "—"}
+                    </p>
+                  </div>
+
+                  <div id="switch-groups" className="space-y-4">
+                    <div className="flex items-center justify-between gap-4">
+                      <h3 className="text-lg font-bold text-stone-900">群組成員</h3>
+                      <div className="text-sm text-stone-400">
+                        {state.activeGroup?.members?.length || 0} 位
+                      </div>
+                    </div>
+
+                    {state.activeGroup ? (
+                      <div className="grid gap-4 sm:grid-cols-2">
+                        {(state.activeGroup.members || []).map((member) => (
+                          <div
+                            key={member.memberId}
+                            className="flex items-center gap-4 rounded-2xl border border-transparent p-4 transition hover:border-stone-100 hover:bg-stone-50"
+                          >
+                            <div className="h-10 w-10 rounded-full bg-stone-200" />
+                            <div className="flex-1">
+                              <p className="font-bold text-stone-900">{member.displayName}</p>
+                              <p className="text-xs text-stone-500">
+                                {member.memberId === state.activeGroup?.ownerMemberId ? "Admin" : "Member"}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-stone-500">目前尚未加入任何群組。</p>
+                    )}
+
+                    <div className="flex flex-wrap gap-3 pt-2">
+                      {state.groups
+                        .filter((group) => group.id !== state.activeGroup?.id)
+                        .map((group) => (
+                          <Button key={group.id} variant="secondary" onClick={() => handleSwitchGroup(group.id)} disabled={actionPending}>
+                            {group.name}
+                          </Button>
+                        ))}
                       {canLeaveActiveGroup ? (
                         <Button variant="ghost" onClick={handleLeaveGroup} disabled={actionPending}>
                           退出群組
                         </Button>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">群組建立者尚有其他成員時不能退出</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="grid gap-5">
-                    <div className="meal-soft-panel p-5">
-                      <p className="meal-kicker">Switch group</p>
-                      <div className="mt-4 flex flex-wrap gap-3">
-                        {state.groups.filter((group) => group.id !== state.activeGroup?.id).length === 0 ? (
-                          <p className="text-sm text-muted-foreground">目前沒有其他可切換的群組。</p>
-                        ) : (
-                          state.groups
-                            .filter((group) => group.id !== state.activeGroup?.id)
-                            .map((group) => (
-                              <Button key={group.id} variant="secondary" onClick={() => handleSwitchGroup(group.id)} disabled={actionPending}>
-                                {group.name}
-                              </Button>
-                            ))
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="meal-soft-panel p-5">
-                      <p className="meal-kicker">Members</p>
-                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                        {(state.activeGroup.members || []).map((member) => (
-                          <div key={member.memberId} className="rounded-2xl bg-white/70 px-4 py-3 text-sm font-medium text-foreground/85">
-                            {member.displayName}
-                          </div>
-                        ))}
-                      </div>
+                      ) : null}
                     </div>
                   </div>
                 </div>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">目前尚未加入任何群組。</p>
-            )}
-          </Panel>
+              </section>
+            </div>
+          </section>
 
           {state.member.isAdmin ? (
-            <Panel title="管理員：店家 / 菜單管理" description="新增、更新、匯入">
+            <section className="rounded-3xl border border-stone-100 bg-white p-8 shadow-xl">
+              <div className="mb-8">
+                <p className="meal-kicker">Admin tools</p>
+                <h2 className="mt-2 text-2xl font-bold text-stone-900">店家與菜單</h2>
+              </div>
               <div className="grid gap-6 xl:grid-cols-3">
                 <div className="space-y-3">
                   <p className="meal-kicker">新增店家</p>
-                  <input className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={merchantDraft.id} onChange={(event) => setMerchantDraft((current) => ({ ...current, id: event.target.value }))} placeholder="merchant id" />
-                  <input className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={merchantDraft.name} onChange={(event) => setMerchantDraft((current) => ({ ...current, name: event.target.value }))} placeholder="店家名稱" />
-                  <input className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={merchantDraft.group} onChange={(event) => setMerchantDraft((current) => ({ ...current, group: event.target.value }))} placeholder="merchant group" />
-                  <input className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={merchantDraft.payoutAddress} onChange={(event) => setMerchantDraft((current) => ({ ...current, payoutAddress: event.target.value }))} placeholder="收款錢包地址" />
+                  <input className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={merchantDraft.id} onChange={(event) => setMerchantDraft((current) => ({ ...current, id: event.target.value }))} placeholder="merchant id" />
+                  <input className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={merchantDraft.name} onChange={(event) => setMerchantDraft((current) => ({ ...current, name: event.target.value }))} placeholder="店家名稱" />
+                  <input className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={merchantDraft.group} onChange={(event) => setMerchantDraft((current) => ({ ...current, group: event.target.value }))} placeholder="merchant group" />
+                  <input className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={merchantDraft.payoutAddress} onChange={(event) => setMerchantDraft((current) => ({ ...current, payoutAddress: event.target.value }))} placeholder="收款錢包地址" />
                   <Button onClick={handleAdminMerchantSave} disabled={actionPending || !merchantDraft.id.trim() || !merchantDraft.name.trim() || !merchantDraft.group.trim() || !merchantDraft.payoutAddress.trim()}>
                     儲存店家
                   </Button>
@@ -384,15 +438,15 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
                 <div className="space-y-3">
                   <p className="meal-kicker">新增菜單品項</p>
                   <input
-                    className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     value={menuDraft.merchantId}
                     onChange={(event) => setMenuDraft((current) => ({ ...current, merchantId: event.target.value }))}
                     placeholder="merchant id"
                   />
-                  <input className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={menuDraft.id} onChange={(event) => setMenuDraft((current) => ({ ...current, id: event.target.value }))} placeholder="item id" />
-                  <input className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={menuDraft.name} onChange={(event) => setMenuDraft((current) => ({ ...current, name: event.target.value }))} placeholder="品項名稱" />
-                  <input className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={menuDraft.priceWei} onChange={(event) => setMenuDraft((current) => ({ ...current, priceWei: event.target.value }))} placeholder="price_wei" />
-                  <input className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={menuDraft.description} onChange={(event) => setMenuDraft((current) => ({ ...current, description: event.target.value }))} placeholder="描述" />
+                  <input className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={menuDraft.id} onChange={(event) => setMenuDraft((current) => ({ ...current, id: event.target.value }))} placeholder="item id" />
+                  <input className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={menuDraft.name} onChange={(event) => setMenuDraft((current) => ({ ...current, name: event.target.value }))} placeholder="品項名稱" />
+                  <input className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={menuDraft.priceWei} onChange={(event) => setMenuDraft((current) => ({ ...current, priceWei: event.target.value }))} placeholder="price_wei" />
+                  <input className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={menuDraft.description} onChange={(event) => setMenuDraft((current) => ({ ...current, description: event.target.value }))} placeholder="描述" />
                   <Button onClick={handleAdminMenuSave} disabled={actionPending || !menuDraft.merchantId || !menuDraft.id.trim() || !menuDraft.name.trim() || !menuDraft.priceWei.trim()}>
                     儲存品項
                   </Button>
@@ -405,12 +459,12 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
                     <input
                       type="file"
                       accept=".csv,text/csv"
-                      className="w-full rounded-2xl border border-border bg-background px-4 py-3"
+                      className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3"
                       onChange={(event) => void handleCsvFileSelected(event.target.files?.[0] ?? null)}
                     />
                   </label>
                   <textarea
-                    className="min-h-[15rem] w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    className="min-h-[15rem] w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     value={csvText}
                     onChange={(event) => setCsvText(event.target.value)}
                     placeholder={"merchant_id,merchant_name,merchant_group,payout_address,item_id,item_name,price_wei,description"}
@@ -421,15 +475,15 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
                   </Button>
                 </div>
               </div>
-            </Panel>
+            </section>
           ) : null}
         </>
       ) : (
-        <section className="overflow-hidden rounded-[1.75rem] border border-[rgba(194,119,60,0.22)] bg-[linear-gradient(135deg,rgba(255,250,244,0.96),rgba(245,235,224,0.92))] p-8 shadow-float">
+        <section className="overflow-hidden rounded-[1.75rem] border border-orange-100 bg-white p-8 shadow-xl">
           <div className="grid gap-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
             <div className="space-y-6">
               <div className="space-y-3">
-                <p className="meal-kicker">Activation</p>
+                <p className="meal-kicker">訂閱</p>
                 <h2 className="font-[var(--font-heading)] text-4xl font-extrabold tracking-[-0.03em] text-balance">
                   開通後才能使用完整功能。
                 </h2>
@@ -452,7 +506,7 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
               </div>
             </div>
 
-            <div className="rounded-[1.5rem] border border-white/50 bg-white/70 p-6 backdrop-blur">
+            <div className="rounded-[1.5rem] border border-orange-100 bg-[#fffaf7] p-6">
               <p className="meal-kicker">開通後立即可用</p>
               <div className="mt-5 space-y-4">
                 {[
@@ -480,9 +534,9 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
 
 function Panel(props: { title: string; description: string; children: React.ReactNode }) {
   return (
-    <section className="meal-panel p-6 shadow-sm">
+    <section className="rounded-[1.5rem] border border-orange-100 bg-white p-6 shadow-sm">
       <p className="meal-kicker">{props.title}</p>
-      <p className="mt-3 text-sm leading-7 text-muted-foreground">{props.description}</p>
+      <p className="mt-3 text-sm text-stone-500">{props.description}</p>
       <div className="mt-6">{props.children}</div>
     </section>
   );
@@ -490,9 +544,9 @@ function Panel(props: { title: string; description: string; children: React.Reac
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="meal-stat">
-      <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{label}</p>
-      <p className="mt-2 text-base font-semibold">{value}</p>
+    <div className="rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-4">
+      <p className="text-xs uppercase tracking-[0.2em] text-stone-400">{label}</p>
+      <p className="mt-2 text-base font-semibold text-stone-900">{value}</p>
     </div>
   );
 }
@@ -502,6 +556,25 @@ function AccessStat({ label, value }: { label: string; value: string }) {
     <div className="rounded-2xl border border-white/55 bg-white/72 px-4 py-4 backdrop-blur">
       <p className="text-xs uppercase tracking-[0.22em] text-muted-foreground">{label}</p>
       <p className="mt-2 text-lg font-semibold text-foreground">{value}</p>
+    </div>
+  );
+}
+
+function shortAddress(address: string) {
+  if (!address) return "尚未綁定錢包地址";
+  if (address.length <= 10) return address;
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function displayInitial(name: string) {
+  return (name || "M").slice(0, 1).toUpperCase();
+}
+
+function DetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-stone-100 bg-stone-50 px-5 py-4">
+      <p className="text-xs font-bold uppercase tracking-[0.18em] text-stone-400">{label}</p>
+      <p className="mt-2 text-base font-semibold text-stone-900">{value}</p>
     </div>
   );
 }

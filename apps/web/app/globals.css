@@ -20,10 +20,7 @@
 
 body {
   @apply bg-background text-foreground antialiased;
-  background-image:
-    radial-gradient(circle at 12% 14%, rgba(194, 119, 60, 0.14), transparent 22rem),
-    radial-gradient(circle at 88% 8%, rgba(122, 87, 61, 0.1), transparent 18rem),
-    linear-gradient(180deg, rgba(255, 250, 244, 0.98), rgba(246, 237, 227, 0.98));
+  background: #fff8f5;
 }
 
 ::selection {
@@ -34,10 +31,7 @@ body {
 @layer components {
   .meal-shell {
     @apply relative min-h-screen overflow-hidden;
-    background:
-      radial-gradient(circle at 14% 18%, rgba(194, 119, 60, 0.18), transparent 24rem),
-      radial-gradient(circle at 86% 14%, rgba(79, 54, 31, 0.12), transparent 18rem),
-      linear-gradient(180deg, #fffaf4 0%, #f6ede3 48%, #f1e5d9 100%);
+    background: #fff8f5;
   }
 
   .meal-grid {
@@ -88,7 +82,7 @@ body {
   }
 
   .meal-glass-header {
-    background: rgba(255, 248, 245, 0.72);
+    background: rgba(255, 255, 255, 0.8);
     backdrop-filter: blur(14px);
   }
 
@@ -97,10 +91,10 @@ body {
   }
 
   .meal-glass-card {
-    background: rgba(255, 255, 255, 0.42);
-    backdrop-filter: blur(24px);
-    border: 1px solid rgba(255, 255, 255, 0.5);
-    box-shadow: 0 8px 32px rgba(154, 68, 45, 0.08);
+    background: rgba(255, 255, 255, 0.72);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 237, 213, 0.9);
+    box-shadow: 0 16px 42px rgba(154, 68, 45, 0.08);
   }
 
   .meal-ambient-shadow {

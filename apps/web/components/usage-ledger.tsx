@@ -27,12 +27,12 @@ export function UsageLedger() {
   }, []);
 
   return (
-    <section className="meal-panel p-8">
+    <section className="rounded-[1.75rem] border border-orange-100 bg-white p-8 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="meal-section-heading max-w-none">
-          <p className="meal-kicker">Usage ledger</p>
+          <p className="meal-kicker">紀錄</p>
           <h1>使用紀錄</h1>
-          <p>查看 Token、提案券與 ETH 流水。</p>
+          <p>Token、提案券、ETH。</p>
         </div>
         <Button variant="secondary" onClick={refresh} disabled={loading}>
           {loading ? "更新中..." : "重新整理"}
@@ -42,7 +42,7 @@ export function UsageLedger() {
       <div className="mt-8 space-y-3">
         {loading ? <LedgerPlaceholder /> : null}
         {!loading && items.length === 0 ? (
-          <div className="rounded-2xl border border-dashed border-border/70 bg-background/60 p-5 text-sm text-muted-foreground">
+          <div className="rounded-2xl border border-dashed border-orange-100 bg-[#fffaf7] p-5 text-sm text-stone-500">
             尚無可顯示的使用紀錄。
           </div>
         ) : null}
@@ -75,7 +75,7 @@ function LedgerPlaceholder() {
   return (
     <>
       {Array.from({ length: 4 }).map((_, index) => (
-        <div key={index} className="h-24 animate-pulse rounded-2xl border border-border/60 bg-background/60" />
+        <div key={index} className="h-24 animate-pulse rounded-2xl border border-orange-100 bg-[#fffaf7]" />
       ))}
     </>
   );

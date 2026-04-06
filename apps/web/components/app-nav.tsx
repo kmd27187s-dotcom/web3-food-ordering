@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { ChevronDown, Wallet } from "lucide-react";
 
 import { clearStoredToken, fetchMe, getStoredToken, setStoredToken, type Member } from "@/lib/api";
 import { authenticateWithWallet, clearWalletConnection, getConnectedWalletAddress } from "@/lib/wallet-auth";
@@ -154,17 +155,17 @@ function AppNavInner({
   return (
     <div className="relative z-[80] flex items-center justify-end gap-3">
       {showLinks ? (
-        <nav className="hidden flex-wrap items-center gap-2 md:flex">
+        <nav className="hidden flex-wrap items-center gap-6 md:flex">
           {links.map((link) => {
             const active = pathname === link.href;
             return (
               <Link
                 key={link.href}
                 href={link.href}
-                className={`rounded-full border px-4 py-2 text-sm font-bold tracking-[0.08em] transition ${
+                className={`text-sm font-medium transition ${
                   active
-                    ? "border-[rgba(148,74,0,0.3)] bg-[rgba(255,255,255,0.82)] text-primary shadow-[0_10px_24px_rgba(148,74,0,0.08)]"
-                    : "border-[rgba(220,193,177,0.46)] bg-[rgba(251,242,237,0.72)] text-muted-foreground hover:border-[rgba(148,74,0,0.24)] hover:text-primary"
+                    ? "text-primary"
+                    : "text-stone-500 hover:text-primary"
                 }`}
               >
                 {link.label}
@@ -178,12 +179,13 @@ function AppNavInner({
         <button
           type="button"
           onClick={interactiveWalletStatus ? handleWalletStatusClick : undefined}
-          className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-[rgba(220,193,177,0.46)] bg-[rgba(255,255,255,0.78)] px-4 py-2 text-sm font-bold text-muted-foreground shadow-[0_10px_24px_rgba(148,74,0,0.06)] transition hover:border-[rgba(148,74,0,0.24)] hover:text-primary disabled:cursor-wait"
+          className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-orange-100 bg-orange-50 px-4 py-2 text-xs font-bold text-primary transition hover:bg-orange-100 disabled:cursor-wait"
           aria-label={member ? "查看錢包連結狀態" : "連接錢包並登入"}
           disabled={walletActionPending || !interactiveWalletStatus}
         >
-          <span className={`h-2.5 w-2.5 rounded-full ${connectedAddress ? "bg-emerald-500" : "bg-muted-foreground/50"}`} />
+          <Wallet className="h-4 w-4" />
           <span>{walletActionPending ? "授權中..." : statusLabel}</span>
+          {member ? <ChevronDown className={`h-4 w-4 transition-transform ${walletMenuOpen ? "rotate-180" : ""}`} /> : null}
         </button>
       </div>
       {walletMessage ? <p className="hidden text-xs text-[hsl(7_65%_42%)] md:block">{walletMessage}</p> : null}
@@ -217,11 +219,11 @@ function AppNavInner({
           <button
             type="button"
             onClick={interactiveWalletStatus ? handleWalletStatusClick : undefined}
-            className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-[rgba(220,193,177,0.46)] bg-[rgba(255,255,255,0.78)] px-4 py-2 text-sm font-bold text-muted-foreground transition hover:border-[rgba(148,74,0,0.24)] hover:text-primary disabled:cursor-wait"
+            className="inline-flex cursor-pointer items-center gap-2 rounded-full border border-orange-100 bg-orange-50 px-4 py-2 text-xs font-bold text-primary transition hover:bg-orange-100 disabled:cursor-wait"
             aria-label={member ? "查看錢包連結狀態" : "連接錢包並登入"}
             disabled={walletActionPending || !interactiveWalletStatus}
           >
-            <span className={`h-2.5 w-2.5 rounded-full ${connectedAddress ? "bg-emerald-500" : "bg-muted-foreground/50"}`} />
+            <Wallet className="h-4 w-4" />
             <span>{walletActionPending ? "授權中..." : statusLabel}</span>
           </button>
         </div>
@@ -274,13 +276,12 @@ function AppNavInner({
                 className="fixed inset-0 z-[150] cursor-default bg-transparent"
                 onClick={() => setWalletMenuOpen(false)}
               />
-              <div className="fixed right-4 top-20 z-[160] min-w-56 rounded-[1.5rem] border border-[rgba(220,193,177,0.42)] bg-[rgba(255,251,247,0.98)] p-3 shadow-float backdrop-blur md:right-6">
-                <p className="px-3 text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground">目前錢包</p>
-                <p className="mt-1 break-all px-3 text-sm font-semibold text-foreground">{member.walletAddress || connectedAddress}</p>
+              <div className="fixed right-4 top-20 z-[160] min-w-56 rounded-2xl border border-orange-100 bg-white p-2 shadow-xl md:right-6">
+                <p className="px-3 py-2 text-xs font-semibold text-stone-500">{member.walletAddress || connectedAddress}</p>
                 <button
                   type="button"
                   onClick={handleLogout}
-                  className="mt-3 w-full rounded-[1rem] border border-[rgba(220,193,177,0.46)] bg-[rgba(251,242,237,0.72)] px-4 py-3 text-left text-sm font-semibold text-foreground transition hover:bg-secondary"
+                  className="w-full rounded-xl px-3 py-2 text-left text-sm font-semibold text-red-600 transition hover:bg-red-50"
                 >
                   登出
                 </button>

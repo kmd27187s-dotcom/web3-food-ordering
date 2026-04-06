@@ -4,6 +4,7 @@ import { createWalletClient, custom, parseAbi } from "viem";
 import { sepolia } from "viem/chains";
 
 export const ORDER_ABI = parseAbi([
+  "function finalizeVote(uint256 proposalId)",
   "function placeOrder(uint256 proposalId, bytes32 orderHash, string note, uint256 amount, uint256 expiry, bytes sig) payable"
 ]);
 

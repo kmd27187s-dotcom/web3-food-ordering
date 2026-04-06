@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { PlusCircle, ShoppingCart, Vote as VoteIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -38,18 +39,24 @@ type GovernanceTab = "proposing" | "voting" | "ordering";
 
 const stageDurationOptions = [10, 20, 30, 40, 50, 60, 70, 80, 90] as const;
 const APPROX_TWD_PER_ETH = 120000;
-const tabMeta: Record<GovernanceTab, { title: string; body: string }> = {
+const tabMeta: Record<GovernanceTab, { title: string; body: string; icon: typeof PlusCircle; step: string }> = {
   proposing: {
     title: "建立提案",
-    body: "設定 round。"
+    body: "設定 round。",
+    icon: PlusCircle,
+    step: "第 1 階段"
   },
   voting: {
     title: "進行投票",
-    body: "估算後送出。"
+    body: "估算後送出。",
+    icon: VoteIcon,
+    step: "第 2 階段"
   },
   ordering: {
     title: "完成點餐",
-    body: "確認總額後付款。"
+    body: "確認總額後付款。",
+    icon: ShoppingCart,
+    step: "第 3 階段"
   }
 };
 
@@ -182,7 +189,7 @@ export function GovernanceBoard() {
     () => ({
       proposing: state.proposals.filter((proposal) => proposal.status === "proposing"),
       voting: state.proposals.filter((proposal) => proposal.status === "voting"),
-      ordering: state.proposals.filter((proposal) => ["ordering", "awaiting_settlement", "settled"].includes(proposal.status))
+      ordering: state.proposals.filter((proposal) => ["awaiting_finalization", "ordering", "awaiting_settlement", "settled"].includes(proposal.status))
     }),
     [state.proposals]
   );
@@ -325,6 +332,45 @@ export function GovernanceBoard() {
     }
   }
 
+  async function handleFinalizeVote(proposal: Proposal) {
+    if (!proposal.chainProposalId || !isUsableContractAddress(state.contractInfo?.orderContract)) {
+      setMessage("這一輪尚未配置鏈上 finalize。");
+      return;
+    }
+    setActionPending(true);
+    setMessage("");
+    try {
+      const walletClient = await ensureSepoliaWallet();
+      const [walletAddress] = await walletClient.getAddresses();
+      const txHash = await walletClient.writeContract({
+        address: state.contractInfo!.orderContract as `0x${string}`,
+        abi: ORDER_ABI,
+        functionName: "finalizeVote",
+        args: [BigInt(proposal.chainProposalId)],
+        account: walletAddress
+      });
+      await registerPendingTransaction({
+        proposalId: proposal.id,
+        action: "finalize_vote",
+        txHash,
+        walletAddress,
+        relatedOrder: ""
+      });
+      await refresh();
+      setActiveTab("ordering");
+      setMessage(`已送出 finalize 交易：${txHash.slice(0, 10)}... 正在等待鏈上確認。`);
+
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 4000));
+        await refresh();
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Finalize 失敗");
+    } finally {
+      setActionPending(false);
+    }
+  }
+
   function setOrderQuantity(proposalId: number, itemId: string, quantity: number) {
     setOrderItems((current) => ({
       ...current,
@@ -344,7 +390,7 @@ export function GovernanceBoard() {
   if (loading) {
     return (
       <div className="space-y-8">
-        <div className="meal-panel p-8">
+        <div className="rounded-[1.75rem] border border-orange-100 bg-white p-8 shadow-sm">
           <div className="h-4 w-32 animate-pulse rounded bg-muted" />
           <div className="mt-4 h-8 w-64 animate-pulse rounded bg-muted" />
           <div className="mt-4 h-4 w-96 animate-pulse rounded bg-muted" />
@@ -370,10 +416,10 @@ export function GovernanceBoard() {
 
   return (
     <div className="space-y-8">
-      <section className="meal-panel p-8">
+      <section className="rounded-[1.75rem] border border-orange-100 bg-white p-8 shadow-sm">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="meal-section-heading max-w-none">
-            <p className="meal-kicker">Governance</p>
+            <p className="meal-kicker">治理</p>
             <h1>治理工作台</h1>
             <p>提案、投票、點餐。</p>
           </div>
@@ -386,35 +432,66 @@ export function GovernanceBoard() {
         </div>
       </section>
 
-      <section className="grid gap-5 lg:grid-cols-[0.78fr_1.22fr] lg:items-end">
-        <div className="meal-section-heading max-w-none">
-          <p className="meal-kicker">Current stage</p>
-          <h2>{tabMeta[activeTab].title}</h2>
-          <p>{tabMeta[activeTab].body}</p>
+      <section className="space-y-8">
+        <div className="relative flex justify-between items-center max-w-3xl py-2">
+          {(["proposing", "voting", "ordering"] as GovernanceTab[]).map((tab, index) => {
+            const meta = tabMeta[tab];
+            const Icon = meta.icon;
+            const active = activeTab === tab;
+            return (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => setActiveTab(tab)}
+                className="relative z-10 flex flex-col items-center gap-3"
+              >
+                <div
+                  className={`flex h-14 w-14 items-center justify-center rounded-full ring-4 ring-[#fff8f5] transition-all ${
+                    active ? "bg-primary text-white shadow-lg shadow-primary/30" : "bg-stone-100 text-stone-400"
+                  }`}
+                >
+                  <Icon className="h-6 w-6" />
+                </div>
+                <div className={`text-center ${active ? "opacity-100" : "opacity-50"}`}>
+                  <p className="text-sm font-bold text-primary">{index + 1 === 1 ? "第 1 階段" : index + 1 === 2 ? "第 2 階段" : "第 3 階段"}</p>
+                  <p className="text-lg font-extrabold text-stone-900">{tab === "proposing" ? "提案" : tab === "voting" ? "投票" : "點餐"}</p>
+                </div>
+              </button>
+            );
+          })}
+          <div className="absolute left-0 top-7 h-1 w-full bg-stone-100" />
         </div>
-        <div className="meal-glass-card rounded-[1.6rem] p-3">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <TabButton active={activeTab === "proposing"} onClick={() => setActiveTab("proposing")}>
-              提案
-            </TabButton>
-            <TabButton active={activeTab === "voting"} onClick={() => setActiveTab("voting")}>
-              投票
-            </TabButton>
-            <TabButton active={activeTab === "ordering"} onClick={() => setActiveTab("ordering")}>
-              點餐
-            </TabButton>
+
+        <div className="grid gap-5 lg:grid-cols-[0.78fr_1.22fr] lg:items-end">
+          <div className="meal-section-heading max-w-none">
+            <p className="meal-kicker">目前階段</p>
+            <h2>{tabMeta[activeTab].title}</h2>
+            <p>{tabMeta[activeTab].body}</p>
+          </div>
+          <div className="rounded-[1.6rem] border border-orange-100 bg-white p-3 shadow-sm">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <TabButton active={activeTab === "proposing"} onClick={() => setActiveTab("proposing")}>
+                提案
+              </TabButton>
+              <TabButton active={activeTab === "voting"} onClick={() => setActiveTab("voting")}>
+                投票
+              </TabButton>
+              <TabButton active={activeTab === "ordering"} onClick={() => setActiveTab("ordering")}>
+                點餐
+              </TabButton>
+            </div>
           </div>
         </div>
       </section>
 
       {activeTab === "proposing" ? (
         <>
-          <section className="meal-panel p-6 shadow-sm">
-            <p className="meal-kicker">Create round</p>
+          <section className="rounded-[1.5rem] border border-orange-100 bg-white p-6 shadow-sm">
+            <p className="meal-kicker">建立 round</p>
             <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
               <Field label="群組">
                 <select
-                  className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={createDraft.groupId}
                   onChange={(event) => setCreateDraft((current) => ({ ...current, groupId: event.target.value }))}
                 >
@@ -428,7 +505,7 @@ export function GovernanceBoard() {
               </Field>
               <Field label="提案標題">
                 <input
-                  className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={createDraft.title}
                   onChange={(event) => setCreateDraft((current) => ({ ...current, title: event.target.value }))}
                   placeholder="例：信義辦公室午餐票選"
@@ -439,14 +516,14 @@ export function GovernanceBoard() {
                   type="number"
                   min={3}
                   max={10}
-                  className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={createDraft.maxOptions}
                   onChange={(event) => setCreateDraft((current) => ({ ...current, maxOptions: event.target.value }))}
                 />
               </Field>
               <Field label="提名時間（分鐘）">
                 <select
-                  className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={createDraft.proposalMinutes}
                   onChange={(event) => setCreateDraft((current) => ({ ...current, proposalMinutes: event.target.value }))}
                 >
@@ -459,7 +536,7 @@ export function GovernanceBoard() {
               </Field>
               <Field label="投票時間（分鐘）">
                 <select
-                  className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={createDraft.voteMinutes}
                   onChange={(event) => setCreateDraft((current) => ({ ...current, voteMinutes: event.target.value }))}
                 >
@@ -472,7 +549,7 @@ export function GovernanceBoard() {
               </Field>
               <Field label="點餐時間（分鐘）">
                 <select
-                  className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={createDraft.orderMinutes}
                   onChange={(event) => setCreateDraft((current) => ({ ...current, orderMinutes: event.target.value }))}
                 >
@@ -497,11 +574,11 @@ export function GovernanceBoard() {
               <Button onClick={handleCreateProposal} disabled={actionPending || !createDraft.title.trim() || !createDraft.groupId}>
                 {actionPending ? "處理中..." : "建立本輪提案"}
               </Button>
-              <p className="text-sm text-muted-foreground">建立 round 消耗 1 token。</p>
+              <p className="text-sm text-stone-500">建立 round 消耗 1 token。</p>
             </div>
           </section>
 
-          <Section title="提案期" description="建立候選清單。">
+          <Section title="提案期" description="建立候選清單">
             {grouped.proposing.length === 0 ? <Empty text="目前沒有進行中的提案期 round。" /> : null}
             <div className="grid gap-5 xl:grid-cols-2">
               {grouped.proposing.map((proposal) => (
@@ -534,13 +611,13 @@ export function GovernanceBoard() {
       ) : null}
 
       {activeTab === "voting" ? (
-        <Section title="投票期" description="輸入 token 權重後送出。">
+        <Section title="投票期" description="輸入 token 權重後送出">
           {grouped.voting.length === 0 ? <Empty text="目前沒有進行中的投票期 round。" /> : null}
           <div className="grid gap-5 xl:grid-cols-2">
             {grouped.voting.map((proposal) => (
               <ProposalCard key={proposal.id} proposal={proposal}>
                 <div className="space-y-4">
-                      <div className="meal-soft-panel px-4 py-4 text-sm text-muted-foreground">
+                  <div className="rounded-[1.25rem] border border-orange-100 bg-[#fffaf7] px-4 py-4 text-sm text-stone-500">
                     目前總票重 {safeArray(proposal.options).reduce((sum, option) => sum + option.weightedVotes, 0)}。
                     {proposal.currentVoteOptionId
                       ? ` 你目前已投入 ${proposal.currentVoteTokenAmount} Token，個人票重 ${proposal.currentVoteWeight}。`
@@ -551,7 +628,7 @@ export function GovernanceBoard() {
                       <input
                         type="number"
                         min={1}
-                        className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        className="w-full rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         value={voteTokens[proposal.id] || "0"}
                         onChange={(event) => setVoteTokens((current) => ({ ...current, [proposal.id]: event.target.value }))}
                       />
@@ -563,7 +640,7 @@ export function GovernanceBoard() {
                   </Field>
                   <div className="grid gap-3">
                     {safeArray(proposal.options).map((option) => (
-                      <div key={option.id} className="meal-soft-panel px-4 py-4">
+                      <div key={option.id} className="rounded-[1.25rem] border border-orange-100 bg-[#fffaf7] px-4 py-4">
                         <div className="flex items-center justify-between gap-4">
                           <div>
                             <p className="font-semibold">{option.merchantName}</p>
@@ -584,7 +661,7 @@ export function GovernanceBoard() {
       ) : null}
 
       {activeTab === "ordering" ? (
-        <Section title="點餐期 / 結算期" description="選餐、確認總額，再把付款交給 MetaMask。">
+        <Section title="點餐期 / 結算期" description="選餐後交給 MetaMask 付款">
           {grouped.ordering.length === 0 ? <Empty text="目前沒有可點餐或已結算的 round。" /> : null}
           <div className="grid gap-5 xl:grid-cols-2">
             {grouped.ordering.map((proposal) => {
@@ -603,29 +680,41 @@ export function GovernanceBoard() {
                 <ProposalCard key={proposal.id} proposal={proposal}>
                   <div className="space-y-4">
                     <div className="meal-soft-panel px-4 py-4">
-                      <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">勝出店家</p>
+                      <p className="text-sm uppercase tracking-[0.2em] text-stone-400">勝出店家</p>
                       <p className="mt-2 text-lg font-semibold">{winner?.merchantName || "尚未定案"}</p>
-                      <p className="mt-2 text-sm text-muted-foreground">
+                      <p className="mt-2 text-sm text-stone-500">
                         本輪總額 {formatWeiFriendly(proposal.orderTotalWei)} · {proposal.orderMemberCount} 人點餐
                       </p>
                       {proposal.chainProposalId ? (
-                        <p className="mt-2 text-xs text-muted-foreground">
+                        <p className="mt-2 text-xs text-stone-500">
                           chainProposalId: {proposal.chainProposalId}
                           {isUsableContractAddress(state.contractInfo?.orderContract) ? " · 會直接走 Sepolia 合約送單" : " · 合約地址未配置，將退回本地點餐"}
                         </p>
                       ) : null}
                     </div>
-                    {proposal.status === "ordering" && merchant?.menu?.length ? (
+                    {proposal.status === "awaiting_finalization" ? (
+                      <div className="rounded-[1.35rem] border border-orange-100 bg-[#fffaf7] px-4 py-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="meal-kicker">等待 finalize</p>
+                            <p className="mt-2 text-sm text-stone-500">投票已截止。先 finalize，確認後會自動刷新並切到菜單。</p>
+                          </div>
+                          <Button onClick={() => handleFinalizeVote(proposal)} disabled={actionPending || !proposal.chainProposalId}>
+                            Finalize 投票結果
+                          </Button>
+                        </div>
+                      </div>
+                    ) : proposal.status === "ordering" && merchant?.menu?.length ? (
                       <div className="space-y-3">
                         {merchant.menu.map((item) => (
-                        <div key={item.id} className="flex items-center justify-between gap-4 rounded-[1.35rem] border border-[rgba(220,193,177,0.36)] bg-[rgba(255,255,255,0.68)] px-4 py-4 backdrop-blur">
+                        <div key={item.id} className="flex items-center justify-between gap-4 rounded-[1.35rem] border border-orange-100 bg-[#fffaf7] px-4 py-4">
                             <div>
                               <p className="font-semibold">{item.name}</p>
-                              <p className="text-sm text-muted-foreground">{formatWeiFriendly(item.priceWei)}</p>
+                              <p className="text-sm text-stone-500">{formatWeiFriendly(item.priceWei)}</p>
                             </div>
                             <div className="flex items-center gap-4">
                               <div className="min-w-[9rem] text-right">
-                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">項目總額</p>
+                                <p className="text-xs uppercase tracking-[0.16em] text-stone-400">項目總額</p>
                                 <p className="mt-1 text-sm font-semibold text-foreground">
                                   {formatWeiFriendly(BigInt(item.priceWei) * BigInt(orderItems[proposal.id]?.[item.id] || 0))}
                                 </p>
@@ -634,18 +723,18 @@ export function GovernanceBoard() {
                                 type="number"
                                 min={0}
                                 aria-label={`${item.name} 數量`}
-                                className="w-24 rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                className="w-24 rounded-2xl border border-orange-100 bg-white px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                                 value={String(orderItems[proposal.id]?.[item.id] || 0)}
                                 onChange={(event) => setOrderQuantity(proposal.id, item.id, Number(event.target.value))}
                               />
                             </div>
                           </div>
                         ))}
-                        <div className="rounded-[1.35rem] border border-[rgba(194,119,60,0.28)] bg-[rgba(194,119,60,0.08)] px-4 py-4">
+                        <div className="rounded-[1.35rem] border border-orange-100 bg-[#fffaf7] px-4 py-4">
                           <p className="meal-kicker">Order summary</p>
                           <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
                             <div>
-                              <p className="text-sm text-muted-foreground">已選 {selectedItems.length} 項餐點，送出前會先檢查餘額。</p>
+                              <p className="text-sm text-stone-500">已選 {selectedItems.length} 項餐點，送出前會先檢查餘額。</p>
                               <p className="mt-2 text-lg font-semibold text-foreground">{formatWeiFriendly(selectedSubtotalWei)}</p>
                             </div>
                             <Button onClick={() => handleOrder(proposal)} disabled={actionPending || !canSubmitOrder}>
@@ -655,7 +744,7 @@ export function GovernanceBoard() {
                         </div>
                       </div>
                     ) : proposal.status === "ordering" ? (
-                      <div className="rounded-2xl border border-dashed border-border/70 bg-background/60 p-5 text-sm text-muted-foreground">
+                      <div className="rounded-2xl border border-dashed border-orange-100 bg-[#fffaf7] p-5 text-sm text-stone-500">
                         {winner ? "菜單載入中或目前沒有菜單。" : "等待投票結果 finalize 後才能點餐。"}
                       </div>
                     ) : null}
@@ -701,7 +790,7 @@ function Section(props: { title: string; description: string; children: React.Re
     <section className="space-y-4">
       <div>
         <p className="meal-kicker">{props.title}</p>
-        <p className="mt-2 text-sm leading-7 text-muted-foreground">{props.description}</p>
+        <p className="mt-2 text-sm text-stone-500">{props.description}</p>
       </div>
       {props.children}
     </section>
@@ -710,19 +799,19 @@ function Section(props: { title: string; description: string; children: React.Re
 
 function ProposalCard(props: { proposal: Proposal; children: React.ReactNode }) {
   return (
-    <article className="meal-panel p-6 shadow-sm">
+    <article className="rounded-[1.5rem] border border-orange-100 bg-white p-6 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">
+          <p className="text-sm uppercase tracking-[0.2em] text-stone-400">
             {props.proposal.mealPeriod} · 群組 {props.proposal.groupId}
           </p>
           <h2 className="mt-2 font-[var(--font-heading)] text-2xl font-bold">{props.proposal.title}</h2>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="mt-2 text-sm text-stone-500">
             提名截止 {formatDateTime(props.proposal.proposalDeadline)} / 投票截止 {formatDateTime(props.proposal.voteDeadline)} / 點餐截止{" "}
             {formatDateTime(props.proposal.orderDeadline)}
           </p>
         </div>
-        <span className="rounded-full border border-[rgba(220,193,177,0.42)] bg-[rgba(251,242,237,0.7)] px-4 py-2 text-sm font-semibold text-muted-foreground">
+        <span className="rounded-full border border-orange-100 bg-[#fffaf7] px-4 py-2 text-sm font-semibold text-stone-500">
           {props.proposal.status}
         </span>
       </div>
@@ -738,13 +827,13 @@ function OptionList({ options }: { options: ProposalOption[] }) {
   return (
     <div className="grid gap-3">
       {safeArray(options).map((option) => (
-        <div key={option.id} className="meal-soft-panel px-4 py-4">
+        <div key={option.id} className="rounded-[1.25rem] border border-orange-100 bg-[#fffaf7] px-4 py-4">
           <div className="flex items-center justify-between gap-4">
             <div>
               <p className="font-semibold">{option.merchantName}</p>
-              <p className="text-sm text-muted-foreground">{option.merchantId}</p>
+              <p className="text-sm text-stone-500">{option.merchantId}</p>
             </div>
-            <span className="text-sm text-muted-foreground">{option.weightedVotes} 票重</span>
+            <span className="text-sm text-stone-500">{option.weightedVotes} 票重</span>
           </div>
         </div>
       ))}
@@ -755,7 +844,7 @@ function OptionList({ options }: { options: ProposalOption[] }) {
 function Field(props: { label: string; children: React.ReactNode }) {
   return (
     <label className="block space-y-2 text-sm">
-      <span className="text-[11px] font-black uppercase tracking-[0.18em] text-muted-foreground">{props.label}</span>
+      <span className="text-[11px] font-black uppercase tracking-[0.18em] text-stone-400">{props.label}</span>
       {props.children}
     </label>
   );
@@ -763,16 +852,16 @@ function Field(props: { label: string; children: React.ReactNode }) {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="meal-stat">
-      <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{label}</p>
-      <p className="mt-2 text-base font-semibold">{value}</p>
+    <div className="rounded-2xl border border-orange-100 bg-[#fffaf7] px-4 py-4">
+      <p className="text-xs uppercase tracking-[0.2em] text-stone-400">{label}</p>
+      <p className="mt-2 text-base font-semibold text-stone-900">{value}</p>
     </div>
   );
 }
 
 function Empty({ text, compact = false }: { text: string; compact?: boolean }) {
   return (
-    <div className={`rounded-2xl border border-dashed border-border/70 bg-background/60 text-sm text-muted-foreground ${compact ? "p-4" : "p-5"}`}>
+    <div className={`rounded-2xl border border-dashed border-orange-100 bg-[#fffaf7] text-sm text-stone-500 ${compact ? "p-4" : "p-5"}`}>
       {text}
     </div>
   );
@@ -783,10 +872,10 @@ function TabButton(props: { active: boolean; onClick: () => void; children: Reac
     <button
       type="button"
       onClick={props.onClick}
-      className={`cursor-pointer rounded-full border px-5 py-2.5 text-sm font-bold tracking-[0.08em] transition ${
+      className={`cursor-pointer rounded-full border px-5 py-2.5 text-sm font-bold transition ${
         props.active
-          ? "border-[rgba(148,74,0,0.3)] bg-[rgba(255,255,255,0.85)] text-primary shadow-[0_10px_24px_rgba(148,74,0,0.08)]"
-          : "border-[rgba(220,193,177,0.46)] bg-[rgba(251,242,237,0.72)] text-muted-foreground hover:border-[rgba(148,74,0,0.24)] hover:text-primary"
+          ? "border-orange-200 bg-orange-50 text-primary"
+          : "border-orange-100 bg-white text-stone-500 hover:bg-[#fffaf7] hover:text-primary"
       }`}
     >
       {props.children}
@@ -864,13 +953,13 @@ function MerchantPicker(props: MerchantPickerProps) {
     <Field label={label}>
       <div className="space-y-3">
         <input
-          className="w-full rounded-[1.2rem] border border-[rgba(220,193,177,0.42)] bg-[rgba(255,255,255,0.72)] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          className="w-full rounded-[1.2rem] border border-orange-100 bg-[#fffaf7] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           value={query}
           onChange={(event) => handleChange(event.target.value)}
           placeholder="搜尋店名或 merchant id"
         />
         {filteredMerchants.length ? (
-          <div className="rounded-[1.2rem] border border-[rgba(220,193,177,0.36)] bg-[rgba(255,255,255,0.68)] p-2 backdrop-blur">
+          <div className="rounded-[1.2rem] border border-orange-100 bg-white p-2">
             <div className="grid gap-2">
               {filteredMerchants.map((merchant) => (
                 <button
@@ -880,7 +969,7 @@ function MerchantPicker(props: MerchantPickerProps) {
                   className={`w-full rounded-[1rem] px-3 py-3 text-left transition ${
                     selectedMerchantId === merchant.id
                       ? "bg-primary text-primary-foreground shadow-[0_10px_24px_rgba(148,74,0,0.14)]"
-                      : "bg-transparent text-foreground hover:bg-secondary"
+                      : "bg-transparent text-foreground hover:bg-[#fffaf7]"
                   }`}
                 >
                   <p className="font-semibold">{merchant.name}</p>

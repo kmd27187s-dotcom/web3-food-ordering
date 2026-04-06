@@ -6,6 +6,7 @@
 
 FROM node:20-alpine AS deps
 WORKDIR /app
+RUN apk add --no-cache python3 make g++ libc6-compat
 COPY apps/web/package.json apps/web/package-lock.json ./apps/web/
 WORKDIR /app/apps/web
 RUN npm ci

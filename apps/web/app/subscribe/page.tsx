@@ -4,18 +4,19 @@ import { SubscriptionCheckpoint } from "@/components/subscription-checkpoint";
 
 export default function SubscribePage() {
   return (
-    <main id="main-content" className="meal-page max-w-6xl">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <p className="meal-kicker">MealVote / Activation</p>
-          <p className="mt-2 text-sm text-muted-foreground">登入已完成，這裡只處理開通。</p>
+    <main id="main-content" className="min-h-screen bg-[#fff8f5]">
+      <div className="mx-auto max-w-4xl px-6 py-8 md:py-10">
+        <div className="mb-10 flex items-center justify-between gap-4">
+          <p className="text-xl font-bold text-primary">MealVote</p>
+          <AppNavCompact />
         </div>
-        <AppNavCompact />
-      </div>
 
-      <SessionGate>
-        <SubscriptionCheckpoint />
-      </SessionGate>
+        <SessionGate>
+          <div className="space-y-12 py-8">
+            <SubscriptionCheckpoint />
+          </div>
+        </SessionGate>
+      </div>
     </main>
   );
 }

@@ -1,0 +1,16 @@
+.git
+.github
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+build
+coverage
+tmp
+*.log
+backend/mealvote.db
+backend/backend
+frontend
+docs
+design-system

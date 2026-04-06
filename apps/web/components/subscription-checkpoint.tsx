@@ -42,62 +42,92 @@ export function SubscriptionCheckpoint() {
   }
 
   if (loading) {
-    return <div className="meal-panel p-8 text-sm text-muted-foreground">正在確認訂閱狀態...</div>;
+    return <div className="rounded-[1.75rem] border border-orange-100 bg-white p-8 text-sm text-stone-500 shadow-sm">正在確認訂閱狀態...</div>;
   }
 
   return (
-    <section className="overflow-hidden rounded-[2rem] border border-[rgba(194,119,60,0.22)] bg-[linear-gradient(135deg,rgba(255,250,244,0.98),rgba(245,235,224,0.94))] p-8 shadow-[0_24px_64px_rgba(93,54,27,0.1)]">
-      <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-center">
-        <div className="space-y-6">
-          <div className="meal-section-heading">
-            <p className="meal-kicker">Subscription checkpoint</p>
-            <h1>還差訂閱。</h1>
-            <p>99 Token / 30 天。</p>
+    <section className="space-y-16">
+      <div className="grid grid-cols-1 gap-12 lg:grid-cols-12 lg:items-start">
+        <div className="space-y-8 lg:col-span-7">
+          <div className="space-y-4">
+            <span className="inline-flex rounded-full bg-primary/10 px-4 py-1.5 text-sm font-bold uppercase tracking-wider text-primary">
+              Checkpoint
+            </span>
+            <h1 className="text-5xl font-black leading-[1.1] tracking-tight text-stone-900 md:text-6xl">
+              最後一步：
+              <br />
+              啟用您的
+              <span className="text-primary">訂餐帳號</span>
+            </h1>
+            <p className="max-w-md text-lg leading-relaxed text-stone-500">錢包已連接，付款後進入系統。</p>
           </div>
 
-          <div className="grid gap-4 sm:grid-cols-3">
-            <AccessStat label="會員" value={member?.displayName || "—"} />
-            <AccessStat label="訂閱費用" value="99 Token" />
-            <AccessStat label="有效期間" value="30 天" />
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={handleSubscribe} disabled={pending} className="meal-hero-gradient min-w-[16rem] rounded-[1.2rem] px-6 py-3.5 text-sm font-bold tracking-[0.04em] text-white shadow-[0_18px_32px_rgba(154,68,45,0.18)]">
-              {pending ? "處理中..." : "支付 99 Token"}
-            </Button>
-            <p className="text-sm text-muted-foreground">付款後進入會員頁。</p>
+          <div className="flex items-center gap-6 rounded-3xl border border-stone-100 bg-stone-50 p-6">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 text-emerald-600">
+              <svg viewBox="0 0 24 24" className="h-8 w-8 fill-none stroke-current stroke-2">
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-bold uppercase tracking-widest text-emerald-600">Status Verified</p>
+              <p className="text-xl font-bold text-stone-900">
+                錢包連接成功 {member?.walletAddress ? `(${shortAddress(member.walletAddress)})` : ""}
+              </p>
+            </div>
           </div>
         </div>
 
-        <div className="meal-glass-card rounded-[1.75rem] p-6">
-          <p className="meal-kicker">開通後立即可用</p>
-          <div className="mt-5 space-y-4">
-            {[
-              "會員頁",
-              "治理頁",
-              "紀錄頁"
-            ].map((item) => (
-              <div key={item} className="flex items-start gap-3">
-                <span className="mt-2 h-2.5 w-2.5 rounded-full bg-foreground/75" />
-                <p className="text-sm leading-7 text-foreground/78">{item}</p>
+        <div className="lg:col-span-5">
+          <div className="relative overflow-hidden rounded-3xl border border-stone-100 bg-white p-8 shadow-2xl">
+            <div className="absolute -right-16 -top-16 h-32 w-32 bg-primary/5 blur-3xl" />
+            <div className="relative z-10 space-y-8">
+              <div className="flex items-start justify-between">
+                <h3 className="text-2xl font-bold text-stone-900">30 天方案</h3>
+                <div className="rounded-xl bg-primary/5 p-2 text-primary">
+                  <svg viewBox="0 0 24 24" className="h-6 w-6 fill-current">
+                    <path d="m12 2 2.7 5.47 6.04.88-4.37 4.26 1.03 6.02L12 15.77 6.6 18.63l1.03-6.02L3.26 8.35l6.04-.88L12 2Z" />
+                  </svg>
+                </div>
               </div>
-            ))}
+
+              <div className="flex items-baseline gap-1">
+                <span className="text-5xl font-black text-stone-900">99</span>
+                <span className="text-xl font-medium text-stone-500">Token</span>
+                <span className="ml-2 text-sm text-stone-400">/ 30 天</span>
+              </div>
+
+              <div className="space-y-4">
+                {["提案", "投票", "點餐", "排行榜與紀錄"].map((item) => (
+                  <div key={item} className="flex items-start gap-3">
+                    <span className="mt-2 h-2 w-2 rounded-full bg-primary" />
+                    <span className="font-medium text-stone-600">{item}</span>
+                  </div>
+                ))}
+              </div>
+
+              <Button
+                onClick={handleSubscribe}
+                disabled={pending}
+                className="w-full rounded-2xl bg-gradient-to-br from-primary to-[hsl(18_62%_62%)] py-5 text-lg font-bold text-white shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95"
+              >
+                {pending ? "處理中..." : "支付並啟用帳號"}
+              </Button>
+
+              <p className="text-center text-sm font-medium text-stone-400">餘額不足時請先補足。</p>
+            </div>
           </div>
         </div>
       </div>
 
       <div aria-live="polite" aria-atomic="true">
-        {message ? <p className="mt-6 text-sm text-primary">{message}</p> : null}
+        {message ? <p className="text-sm text-primary">{message}</p> : null}
       </div>
     </section>
   );
 }
 
-function AccessStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-[1.25rem] border border-[rgba(220,193,177,0.38)] bg-white/72 px-5 py-4">
-      <p className="text-[11px] uppercase tracking-[0.22em] text-muted-foreground">{label}</p>
-      <p className="mt-3 text-lg font-semibold text-foreground">{value}</p>
-    </div>
-  );
+function shortAddress(address: string) {
+  if (!address) return "";
+  if (address.length <= 10) return address;
+  return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
