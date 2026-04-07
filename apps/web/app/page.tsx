@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, ShieldCheck, Store, Users } from "lucide-react";
 
 import { AppNavCompact } from "@/components/app-nav";
 import { LoginPanel } from "@/components/login-panel";
@@ -15,6 +15,27 @@ const heroNotes = [
   "提案階段先建立候選餐廳。",
   "投票階段用 token 權重決定方向。",
   "點餐階段直接跳 MetaMask 完成付款。"
+] as const;
+
+const roleCards = [
+  {
+    href: "/member",
+    title: "會員入口",
+    body: "治理、投票、點餐與紀錄。",
+    icon: Users
+  },
+  {
+    href: "/merchant",
+    title: "店家入口",
+    body: "連結錢包後接單、查看訂單、送審菜單。",
+    icon: Store
+  },
+  {
+    href: "/admin",
+    title: "平台管理",
+    body: "帳密登入看後台統計與菜單審核。",
+    icon: ShieldCheck
+  }
 ] as const;
 
 export default function HomePage() {
@@ -73,6 +94,22 @@ export default function HomePage() {
               </Button>
               <span className="text-sm text-muted-foreground">未登入或未訂閱時會回入口。</span>
             </div>
+
+            <div className="grid gap-4 md:grid-cols-3">
+              {roleCards.map((card) => {
+                const Icon = card.icon;
+                return (
+                  <Link key={card.href} href={card.href} className="meal-glass-card rounded-[1.6rem] p-5 transition hover:-translate-y-0.5 hover:border-[rgba(148,74,0,0.28)]">
+                    <div className="flex items-center justify-between">
+                      <Icon className="h-5 w-5 text-primary" />
+                      <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <p className="mt-4 text-lg font-bold text-foreground">{card.title}</p>
+                    <p className="mt-2 text-sm leading-7 text-muted-foreground">{card.body}</p>
+                  </Link>
+                );
+              })}
+            </div>
           </div>
 
           <div className="relative">
@@ -113,6 +150,18 @@ export default function HomePage() {
                 </div>
               </div>
             </div>
+          </div>
+        </section>
+        <section className="relative z-10 pb-10">
+          <div className="meal-glass-card rounded-[1.8rem] p-6 md:flex md:items-center md:justify-between">
+            <div>
+              <p className="meal-kicker">Platform admin preset</p>
+              <h2 className="mt-2 text-2xl font-extrabold text-foreground">測試用平台管理者帳號已開好</h2>
+              <p className="mt-2 text-sm leading-7 text-muted-foreground">帳號 `alice@example.com`，密碼 `demo1234`。登入後可進入平台儀表板審核店家菜單。</p>
+            </div>
+            <Button asChild className="mt-4 rounded-full px-6 md:mt-0">
+              <Link href="/admin">進入平台管理</Link>
+            </Button>
           </div>
         </section>
       </div>

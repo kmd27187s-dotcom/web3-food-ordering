@@ -22,7 +22,11 @@ type Member struct {
 	Points                   int64     `json:"points"`
 	TokenBalance             int64     `json:"tokenBalance"`
 	ProposalTicketCount      int64     `json:"proposalTicketCount"`
+	VoteTicketCount          int64     `json:"voteTicketCount"`
+	CreateOrderTicketCount   int64     `json:"createOrderTicketCount"`
 	ClaimableProposalTickets int64     `json:"claimableProposalTickets"`
+	ClaimableVoteTickets     int64     `json:"claimableVoteTickets"`
+	ClaimableCreateOrderTickets int64  `json:"claimableCreateOrderTickets"`
 	SubscriptionExpiresAt    time.Time `json:"subscriptionExpiresAt,omitempty"`
 	SubscriptionActive       bool      `json:"subscriptionActive"`
 	CreatedAt                time.Time `json:"createdAt"`
@@ -44,11 +48,19 @@ type MemberProfile struct {
 }
 
 type Merchant struct {
-	ID            string      `json:"id"`
-	Name          string      `json:"name"`
-	Group         string      `json:"group"`
-	PayoutAddress string      `json:"payoutAddress"`
-	Menu          []*MenuItem `json:"menu"`
+	ID                string      `json:"id"`
+	Name              string      `json:"name"`
+	Group             string      `json:"group"`
+	Address           string      `json:"address"`
+	Description       string      `json:"description"`
+	PayoutAddress     string      `json:"payoutAddress"`
+	AverageRating     float64     `json:"averageRating,omitempty"`
+	ReviewCount       int64       `json:"reviewCount,omitempty"`
+	DelistRequestedAt time.Time   `json:"delistRequestedAt,omitempty"`
+	DelistedAt        time.Time   `json:"delistedAt,omitempty"`
+	OwnerMemberID     int64       `json:"ownerMemberId,omitempty"`
+	OwnerDisplayName  string      `json:"ownerDisplayName,omitempty"`
+	Menu              []*MenuItem `json:"menu"`
 }
 
 type MenuItem struct {
@@ -108,20 +120,28 @@ type VoteRecord struct {
 	VoteWeight   int64  `json:"voteWeight"`
 	SubmittedAt  string `json:"submittedAt"`
 	WalletHidden bool   `json:"walletHidden"`
+	UseVoteTicket bool  `json:"useVoteTicket"`
 }
 
 type Order struct {
-	ID         int64           `json:"id"`
-	ProposalID int64           `json:"proposalId"`
-	MemberID   int64           `json:"memberId"`
-	MemberName string          `json:"memberName"`
-	MerchantID string          `json:"merchantId"`
-	OrderHash  string          `json:"orderHash"`
-	AmountWei  string          `json:"amountWei"`
-	Status     string          `json:"status"`
-	Items      []*OrderItem    `json:"items"`
-	Signature  *OrderSignature `json:"signature,omitempty"`
-	CreatedAt  time.Time       `json:"createdAt"`
+	ID                    int64           `json:"id"`
+	ProposalID            int64           `json:"proposalId"`
+	Title                 string          `json:"title"`
+	MemberID              int64           `json:"memberId"`
+	MemberName            string          `json:"memberName"`
+	MerchantID            string          `json:"merchantId"`
+	MerchantName          string          `json:"merchantName,omitempty"`
+	MerchantPayoutAddress string          `json:"merchantPayoutAddress,omitempty"`
+	OrderHash             string          `json:"orderHash"`
+	AmountWei             string          `json:"amountWei"`
+	Status                string          `json:"status"`
+	Items                 []*OrderItem    `json:"items"`
+	Signature             *OrderSignature `json:"signature,omitempty"`
+	CreatedAt             time.Time       `json:"createdAt"`
+	AcceptedAt            *time.Time      `json:"acceptedAt,omitempty"`
+	CompletedAt           *time.Time      `json:"completedAt,omitempty"`
+	ConfirmedAt           *time.Time      `json:"confirmedAt,omitempty"`
+	PaidOutAt             *time.Time      `json:"paidOutAt,omitempty"`
 }
 
 type OrderItem struct {
@@ -230,9 +250,11 @@ type Group struct {
 }
 
 type GroupMember struct {
-	MemberID    int64  `json:"memberId"`
-	DisplayName string `json:"displayName"`
-	JoinedAt    string `json:"joinedAt"`
+	MemberID      int64  `json:"memberId"`
+	DisplayName   string `json:"displayName"`
+	WalletAddress string `json:"walletAddress,omitempty"`
+	Points        int64  `json:"points,omitempty"`
+	JoinedAt      string `json:"joinedAt"`
 }
 
 type GroupInvite struct {
@@ -241,6 +263,68 @@ type GroupInvite struct {
 	InviteCode string `json:"inviteCode"`
 	CreatedBy  int64  `json:"createdBy"`
 	CreatedAt  string `json:"createdAt"`
+	UsageCount int64  `json:"usageCount"`
+}
+
+type RegistrationInviteUsage struct {
+	ID              int64  `json:"id"`
+	InviteCode      string `json:"inviteCode"`
+	InviterMemberID int64  `json:"inviterMemberId"`
+	InviterName     string `json:"inviterName"`
+	UsedByMemberID  int64  `json:"usedByMemberId"`
+	UsedByName      string `json:"usedByName"`
+	UsedAt          string `json:"usedAt"`
+}
+
+type GroupInviteUsage struct {
+	ID            int64  `json:"id"`
+	GroupID       int64  `json:"groupId"`
+	InviteCode    string `json:"inviteCode"`
+	UsedByMemberID int64 `json:"usedByMemberId"`
+	UsedByName    string `json:"usedByName"`
+	UsedAt        string `json:"usedAt"`
+}
+
+type GroupMemberDetail struct {
+	MemberID            int64                 `json:"memberId"`
+	DisplayName         string                `json:"displayName"`
+	WalletAddress       string                `json:"walletAddress,omitempty"`
+	Points              int64                 `json:"points"`
+	TokenBalance        int64                 `json:"tokenBalance"`
+	JoinedAt            string                `json:"joinedAt"`
+	OrdersSubmitted     int64                 `json:"ordersSubmitted"`
+	VotesCast           int64                 `json:"votesCast"`
+	ProposalsCreated    int64                 `json:"proposalsCreated"`
+	MerchantReviews     int64                 `json:"merchantReviews"`
+	RecentOrders        []*Order              `json:"recentOrders"`
+	Profile             *MemberProfile        `json:"profile,omitempty"`
+}
+
+type GroupDetail struct {
+	Group             *Group               `json:"group"`
+	MemberCount       int64                `json:"memberCount"`
+	Members           []*GroupMemberDetail `json:"members"`
+	CanManage         bool                 `json:"canManage"`
+	InviteUsages      []*GroupInviteUsage  `json:"inviteUsages,omitempty"`
+}
+
+type MerchantReview struct {
+	ID               int64     `json:"id"`
+	MerchantID       string    `json:"merchantId"`
+	MemberID         int64     `json:"memberId"`
+	MemberName       string    `json:"memberName"`
+	Rating           int64     `json:"rating"`
+	Comment          string    `json:"comment"`
+	CreatedAt        time.Time `json:"createdAt"`
+}
+
+type MerchantDetail struct {
+	Merchant *Merchant         `json:"merchant"`
+	Reviews  []*MerchantReview `json:"reviews"`
+}
+
+type MemberOrderHistory struct {
+	Orders []*Order `json:"orders"`
 }
 
 type WalletAuthChallenge struct {
@@ -248,4 +332,102 @@ type WalletAuthChallenge struct {
 	Nonce         string    `json:"nonce"`
 	Message       string    `json:"message"`
 	ExpiresAt     time.Time `json:"expiresAt"`
+}
+
+type MenuChangeRequest struct {
+	ID                int64     `json:"id"`
+	MerchantID        string    `json:"merchantId"`
+	MenuItemID        string    `json:"menuItemId"`
+	Action            string    `json:"action"`
+	Status            string    `json:"status"`
+	ItemName          string    `json:"itemName"`
+	PriceWei          int64     `json:"priceWei"`
+	Description       string    `json:"description"`
+	RequestedByMember int64     `json:"requestedByMember"`
+	RequestedByName   string    `json:"requestedByName"`
+	ReviewedByMember  int64     `json:"reviewedByMember,omitempty"`
+	ReviewedByName    string    `json:"reviewedByName,omitempty"`
+	ReviewNote        string    `json:"reviewNote,omitempty"`
+	EffectiveAt       time.Time `json:"effectiveAt,omitempty"`
+	CreatedAt         time.Time `json:"createdAt"`
+	ReviewedAt        time.Time `json:"reviewedAt,omitempty"`
+}
+
+type MerchantDelistRequest struct {
+	MerchantID        string    `json:"merchantId"`
+	MerchantName      string    `json:"merchantName"`
+	OwnerMemberID     int64     `json:"ownerMemberId"`
+	OwnerDisplayName  string    `json:"ownerDisplayName"`
+	PayoutAddress     string    `json:"payoutAddress"`
+	RequestedAt       time.Time `json:"requestedAt"`
+	ReviewedAt        time.Time `json:"reviewedAt,omitempty"`
+	Decision          string    `json:"decision,omitempty"`
+	CurrentlyDelisted bool      `json:"currentlyDelisted"`
+}
+
+type MerchantDashboard struct {
+	Merchant            *Merchant            `json:"merchant"`
+	Orders              []*Order             `json:"orders"`
+	MenuChangeRequests  []*MenuChangeRequest `json:"menuChangeRequests"`
+	AcceptedOrderCount  int64                `json:"acceptedOrderCount"`
+	PendingOrderCount   int64                `json:"pendingOrderCount"`
+	CompletedOrderCount int64                `json:"completedOrderCount"`
+	TotalOrderCount     int64                `json:"totalOrderCount"`
+	TotalRevenueWei     string               `json:"totalRevenueWei"`
+}
+
+type ReadyPayoutOrder struct {
+	OrderID               int64     `json:"orderId"`
+	ProposalID            int64     `json:"proposalId"`
+	MemberName            string    `json:"memberName"`
+	MerchantID            string    `json:"merchantId"`
+	MerchantName          string    `json:"merchantName"`
+	MerchantPayoutAddress string    `json:"merchantPayoutAddress"`
+	AmountWei             string    `json:"amountWei"`
+	Status                string    `json:"status"`
+	CreatedAt             time.Time `json:"createdAt"`
+}
+
+type AdminDashboard struct {
+	MemberCount            int64                    `json:"memberCount"`
+	GroupCount             int64                    `json:"groupCount"`
+	MerchantCount          int64                    `json:"merchantCount"`
+	OrderCount             int64                    `json:"orderCount"`
+	DinerCount             int64                    `json:"dinerCount"`
+	TotalServings          int64                    `json:"totalServings"`
+	PendingMenuReviews     int64                    `json:"pendingMenuReviews"`
+	PendingMerchantDelists int64                    `json:"pendingMerchantDelists"`
+	PlatformTreasury       string                   `json:"platformTreasury"`
+	MenuChangeRequests     []*MenuChangeRequest     `json:"menuChangeRequests"`
+	MerchantDelistRequests []*MerchantDelistRequest `json:"merchantDelistRequests"`
+	ReadyPayoutOrders      []*ReadyPayoutOrder      `json:"readyPayoutOrders"`
+}
+
+type AdminMemberSummary struct {
+	ID                 int64     `json:"id"`
+	DisplayName        string    `json:"displayName"`
+	Email              string    `json:"email"`
+	WalletAddress      string    `json:"walletAddress,omitempty"`
+	IsAdmin            bool      `json:"isAdmin"`
+	SubscriptionActive bool      `json:"subscriptionActive"`
+	TokenBalance       int64     `json:"tokenBalance"`
+	Points             int64     `json:"points"`
+	CreatedAt          time.Time `json:"createdAt"`
+}
+
+type AdminGroupSummary struct {
+	ID               int64     `json:"id"`
+	Name             string    `json:"name"`
+	Description      string    `json:"description"`
+	OwnerMemberID    int64     `json:"ownerMemberId"`
+	OwnerDisplayName string    `json:"ownerDisplayName"`
+	MemberCount      int64     `json:"memberCount"`
+	CreatedAt        time.Time `json:"createdAt"`
+}
+
+type AdminInsights struct {
+	Groups    []*AdminGroupSummary  `json:"groups"`
+	Members   []*AdminMemberSummary `json:"members"`
+	Merchants []*Merchant           `json:"merchants"`
+	Orders    []*Order              `json:"orders"`
 }

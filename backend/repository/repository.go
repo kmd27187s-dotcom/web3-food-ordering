@@ -42,14 +42,18 @@ type MemberRepo interface {
 	MemberByEmail(email string) (*models.Member, error)
 	MemberByWallet(wallet string) (*models.Member, error)
 	MemberByRegistrationInviteCode(code string) (*models.Member, error)
+	ListRegistrationInviteUsages(memberID int64) ([]*models.RegistrationInviteUsage, error)
+	RecordRegistrationInviteUsage(inviteCode string, inviterMemberID, usedByMemberID int64) error
 	MemberBySession(token string) (*models.Member, error)
 	MemberByID(id int64) (*models.Member, error)
+	ListMemberOrders(memberID int64) ([]*models.Order, error)
+	MemberReviewCount(memberID int64) (int64, error)
 	UpgradePasswordHash(memberID int64, hash string) error
 	CreateSession(memberID int64, token string) error
 	UpdateMemberWallet(memberID int64, wallet string) error
 	SetSubscriptionExpiry(memberID int64, expiresAt time.Time) error
 	AddClaimableTickets(memberID, proposalTickets int64) error
-	ClaimTickets(memberID int64) (proposalTickets int64, err error)
+	ClaimTickets(memberID int64) (proposalTickets int64, voteTickets int64, createOrderTickets int64, err error)
 	GrantDailyLoginProposalTicket(memberID int64, now time.Time) (granted bool, err error)
 	SaveWalletAuthChallenge(walletAddress, nonce, message string, expiresAt time.Time) error
 	WalletAuthChallengeByWallet(walletAddress string) (*models.WalletAuthChallenge, error)
@@ -63,13 +67,14 @@ type MemberRepo interface {
 // ProposalRepo handles proposal, option, and vote persistence.
 type ProposalRepo interface {
 	CreateProposal(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time) (*models.Proposal, error)
-	CreateProposalWithCredit(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time) (*models.Proposal, error)
+	CreateProposalWithCredit(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time, useTicket bool) (*models.Proposal, error)
 	ListProposals() []*models.Proposal
 	GetProposal(id int64) (*models.Proposal, error)
+	DeleteProposalByCreator(proposalID, memberID int64) error
 	// InsertProposalOption atomically deducts tokenCost from member and inserts the option row.
-	InsertProposalOption(proposalID, memberID int64, merchantID, merchantName, proposerName string, tokenCost int64) (*models.ProposalOption, error)
+	InsertProposalOption(proposalID, memberID int64, merchantID, merchantName, proposerName string, tokenCost int64, useTicket bool) (*models.ProposalOption, error)
 	// RecordVote atomically deducts tokenAmount from member, increments weighted_votes, and inserts a vote row.
-	RecordVote(proposalID, memberID, optionID int64, tokenAmount int64, memberDisplayName string) error
+	RecordVote(proposalID, memberID, optionID int64, tokenAmount int64, memberDisplayName string, useTicket bool) error
 	// ApplySettlementRewards atomically applies member rewards, option refund values, and marks rewards_applied.
 	ApplySettlementRewards(proposalID int64, rewards []MemberReward, optionRefunds []OptionRefund) error
 }
@@ -77,19 +82,41 @@ type ProposalRepo interface {
 // OrderRepo handles order persistence.
 type OrderRepo interface {
 	SaveOrder(proposalID, memberID int64, quote *models.OrderQuote, sig *models.OrderSignature, memberDisplayName string) (*models.Order, error)
+	UpdateOrderStatus(orderID int64, merchantID, status string) (*models.Order, error)
+	UpdateMemberOrderStatus(orderID, memberID int64, status string) (*models.Order, error)
+	UpdateAdminOrderStatus(orderID int64, status string) (*models.Order, error)
 }
 
 // MerchantRepo handles merchant lookup.
 type MerchantRepo interface {
 	GetMerchant(id string) (*models.Merchant, error)
+	GetMerchantDetail(id string) (*models.MerchantDetail, error)
+	GetMerchantByOwner(memberID int64, wallet string) (*models.Merchant, error)
 	ListMerchants() ([]*models.Merchant, error)
+	ListMerchantReviews(merchantID string) ([]*models.MerchantReview, error)
+	CreateMerchantReview(review *models.MerchantReview) (*models.MerchantReview, error)
+	ClaimMerchant(merchantID string, memberID int64, displayName, wallet string) (*models.Merchant, error)
+	UpsertOwnedMerchantProfile(memberID int64, displayName, wallet string, merchant *models.Merchant) (*models.Merchant, error)
+	UpdateOwnedMerchantWallet(memberID int64, wallet string) (*models.Merchant, error)
+	UnlinkOwnedMerchant(memberID int64) error
+	RequestMerchantDelist(memberID int64) (*models.Merchant, error)
+	ListMerchantDelistRequests(pendingOnly bool) ([]*models.MerchantDelistRequest, error)
+	ReviewMerchantDelist(merchantID string, approve bool) (*models.Merchant, error)
 	UpsertMerchant(merchant *models.Merchant) (*models.Merchant, error)
 	UpsertMenuItem(merchantID string, item *models.MenuItem) error
+	ListMerchantOrders(merchantID string) ([]*models.Order, error)
+	CreateMenuChangeRequest(req *models.MenuChangeRequest) (*models.MenuChangeRequest, error)
+	ListMenuChangeRequests(merchantID string, status string) ([]*models.MenuChangeRequest, error)
+	WithdrawMenuChangeRequest(requestID, requesterMemberID int64) (*models.MenuChangeRequest, error)
+	ReviewMenuChangeRequest(requestID, reviewerMemberID int64, reviewerName string, approved bool, reviewNote string, effectiveAt time.Time) (*models.MenuChangeRequest, error)
+	ApplyScheduledMenuChangeRequests(now time.Time) error
+	CancelMerchantDelist(memberID int64) (*models.Merchant, error)
 }
 
 // ChainRepo handles blockchain event projection state.
 type ChainRepo interface {
 	ContractInfo() models.ContractInfo
+	SetPlatformTreasury(address string) (models.ContractInfo, error)
 	StoreChainEvents(events []*models.ChainEvent, lastSeenBlock uint64, syncErr string) error
 	ChainSyncStatus() (*models.ChainSyncStatus, error)
 	ListChainEvents(limit int) ([]*models.ChainEvent, error)
@@ -115,12 +142,17 @@ type GroupRepo interface {
 	GetGroupByOwnerAndName(ownerMemberID int64, name string) (*models.Group, error)
 	CreateInvite(groupID, createdBy int64, inviteCode string) (*models.GroupInvite, error)
 	GetInviteByCode(code string) (*models.GroupInvite, error)
+	ListGroupInviteUsages(groupID int64) ([]*models.GroupInviteUsage, error)
 	AddMember(groupID, memberID int64) error
+	AddMemberByInvite(groupID, memberID int64, inviteCode string) error
 	RemoveMember(groupID, memberID int64) error
+	UpdateGroup(groupID, ownerMemberID int64, name, description string) (*models.Group, error)
+	RemoveGroupMember(groupID, ownerMemberID, targetMemberID int64) error
 	DeleteGroup(groupID int64) error
 	PruneInactiveGroups(ctx context.Context) error
 	IsMember(groupID, memberID int64) (bool, error)
 	ListMemberGroups(memberID int64) ([]*models.Group, error)
+	GetGroupDetail(groupID, viewerMemberID int64) (*models.GroupDetail, error)
 }
 
 // FaucetRepo handles one-time token faucet claims.
@@ -144,6 +176,9 @@ type AdminRepo interface {
 	// SetProposalGroupID links a proposal to a group after creation.
 	SetProposalGroupID(proposalID, groupID int64) error
 	PruneProposalRounds(groupID, keepProposalID int64) error
+	AdminDashboard() (*models.AdminDashboard, error)
+	AdminInsights() (*models.AdminInsights, error)
+	AdminGroupDetail(groupID int64) (*models.GroupDetail, error)
 }
 
 // Store aggregates all repo interfaces — implemented by PostgresStore.

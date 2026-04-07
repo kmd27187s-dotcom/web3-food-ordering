@@ -91,24 +91,17 @@ func (s *OrderService) Quote(proposalID, memberID int64, items map[string]int64)
 	}, nil
 }
 
-func (s *OrderService) Sign(proposalID, memberID int64, items map[string]int64, walletAddress string) (*models.OrderQuote, *models.OrderSignature, *models.Order, error) {
+func (s *OrderService) Sign(proposalID, memberID int64, items map[string]int64, walletAddress string) (*models.OrderQuote, *models.OrderSignature, error) {
 	proposal, err := s.proposals.GetProposal(proposalID)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	quote, err := s.Quote(proposalID, memberID, items)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	var sig *models.OrderSignature
-	memberDisplayName := ""
-	if s.members != nil {
-		member, err := s.members.MemberByID(memberID)
-		if err == nil {
-			memberDisplayName = member.DisplayName
-		}
-	}
 	if proposal.ChainProposalID == nil {
 		orderHash := computeOrderHash(proposal.ID, memberID, quote.Items)
 		sig = &models.OrderSignature{
@@ -118,19 +111,31 @@ func (s *OrderService) Sign(proposalID, memberID int64, items map[string]int64, 
 		}
 	} else {
 		if s.chain == nil {
-			return nil, nil, nil, errors.New("chain signer unavailable")
+			return nil, nil, errors.New("chain signer unavailable")
 		}
 		orderHash := computeOrderHash(*proposal.ChainProposalID, memberID, quote.Items)
 		sig, err = s.chain.SignOrder(*proposal.ChainProposalID, walletAddress, orderHash, quote.SubtotalWei)
 		if err != nil {
-			return nil, nil, nil, err
+			return nil, nil, err
 		}
 	}
-	order, err := s.orders.SaveOrder(proposalID, memberID, quote, sig, memberDisplayName)
+
+	return quote, sig, nil
+}
+
+func (s *OrderService) SaveSignedOrder(proposalID, memberID int64, items map[string]int64, signature *models.OrderSignature) (*models.Order, error) {
+	quote, err := s.Quote(proposalID, memberID, items)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, err
 	}
-	return quote, sig, order, nil
+	memberDisplayName := ""
+	if s.members != nil {
+		member, lookupErr := s.members.MemberByID(memberID)
+		if lookupErr == nil {
+			memberDisplayName = member.DisplayName
+		}
+	}
+	return s.orders.SaveOrder(proposalID, memberID, quote, signature, memberDisplayName)
 }
 
 func computeOrderHash(proposalID, memberID int64, items any) string {

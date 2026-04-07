@@ -2,7 +2,12 @@ import { AppNav } from "@/components/app-nav";
 import { SessionGate } from "@/components/session-gate";
 import { UsageLedger } from "@/components/usage-ledger";
 
-export default function RecordsPage() {
+export default async function RecordsPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ tab?: "usage" | "proposal-ticket" | "vote-ticket" | "create-order-ticket" | "invite" }>;
+}) {
+  const params = (await searchParams) ?? {};
   return (
     <main id="main-content" className="meal-page max-w-6xl">
       <div className="flex flex-wrap items-center justify-between gap-4">
@@ -12,7 +17,7 @@ export default function RecordsPage() {
         <AppNav />
       </div>
       <SessionGate requireSubscription>
-        <UsageLedger />
+        <UsageLedger initialTab={params.tab || "usage"} />
       </SessionGate>
     </main>
   );

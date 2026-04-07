@@ -51,7 +51,7 @@ export function SubscriptionCheckpoint() {
         <div className="space-y-6">
           <div className="meal-section-heading">
             <p className="meal-kicker">Subscription checkpoint</p>
-            <h1>還差訂閱。</h1>
+            <h1>尚未訂閱成為會員。</h1>
             <p>99 Token / 30 天。</p>
           </div>
 
@@ -63,7 +63,7 @@ export function SubscriptionCheckpoint() {
 
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={handleSubscribe} disabled={pending} className="meal-hero-gradient min-w-[16rem] rounded-[1.2rem] px-6 py-3.5 text-sm font-bold tracking-[0.04em] text-white shadow-[0_18px_32px_rgba(154,68,45,0.18)]">
-              {pending ? "處理中..." : "支付 99 Token"}
+              {pending ? "處理中..." : "立即訂閱"}
             </Button>
             <p className="text-sm text-muted-foreground">付款後進入會員頁。</p>
           </div>
