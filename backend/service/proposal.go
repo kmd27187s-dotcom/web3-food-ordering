@@ -29,7 +29,7 @@ func NewProposalService(proposals repository.ProposalRepo, members repository.Me
 	return &ProposalService{proposals: proposals, members: members, merchants: merchants}
 }
 
-func (s *ProposalService) Create(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions, proposalMinutes, voteMinutes, orderMinutes int64, consumeProposalToken bool) (*models.Proposal, error) {
+func (s *ProposalService) Create(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions, proposalMinutes, voteMinutes, orderMinutes int64, consumeProposalToken bool, useCreateOrderTicket bool) (*models.Proposal, error) {
 	member, err := s.members.MemberByID(memberID)
 	if err != nil {
 		return nil, err
@@ -43,7 +43,7 @@ func (s *ProposalService) Create(memberID int64, title, description, merchantGro
 		merchantGroup = "all"
 	}
 	if mealPeriod == "" {
-		mealPeriod = "lunch"
+		mealPeriod = "custom"
 	}
 	scheduledDate, baseStart, err := resolveProposalSchedule(proposalDate, time.Now())
 	if err != nil {
@@ -65,7 +65,7 @@ func (s *ProposalService) Create(memberID int64, title, description, merchantGro
 		return nil, err
 	}
 	if consumeProposalToken {
-		return s.proposals.CreateProposalWithCredit(memberID, title, description, merchantGroup, mealPeriod, scheduledDate, maxOptions, member.DisplayName, proposalDeadline, voteDeadline, orderDeadline)
+		return s.proposals.CreateProposalWithCredit(memberID, title, description, merchantGroup, mealPeriod, scheduledDate, maxOptions, member.DisplayName, proposalDeadline, voteDeadline, orderDeadline, useCreateOrderTicket)
 	}
 	return s.proposals.CreateProposal(memberID, title, description, merchantGroup, mealPeriod, scheduledDate, maxOptions, member.DisplayName, proposalDeadline, voteDeadline, orderDeadline)
 }
@@ -81,7 +81,7 @@ func (s *ProposalService) CreateWithDeadlines(memberID int64, title, description
 		merchantGroup = "all"
 	}
 	if mealPeriod == "" {
-		mealPeriod = "lunch"
+		mealPeriod = "custom"
 	}
 	if proposalDate == "" {
 		proposalDate = proposalDeadline.In(proposalBusinessLocation()).Format("2006-01-02")
@@ -103,7 +103,35 @@ func (s *ProposalService) List() []*models.Proposal {
 	return s.proposals.ListProposals()
 }
 
-func (s *ProposalService) AddOption(proposalID, memberID int64, merchantID string) (*models.ProposalOption, error) {
+func (s *ProposalService) Delete(proposalID, memberID int64) error {
+	proposal, err := s.proposals.GetProposal(proposalID)
+	if err != nil {
+		return err
+	}
+	if !isCurrentProposalDay(proposal.ProposalDate) {
+		return errors.New("proposal expired for today")
+	}
+	if proposal.Status != "proposing" {
+		return errors.New("only proposing rounds can be deleted")
+	}
+	if proposal.CreatedBy != memberID {
+		return errors.New("only the creator can delete this proposal")
+	}
+	for _, option := range proposal.Options {
+		if option.ProposerMember != memberID {
+			return errors.New("cannot delete after another member has proposed")
+		}
+	}
+	if len(proposal.Votes) > 0 {
+		return errors.New("cannot delete after voting has started")
+	}
+	if len(proposal.Orders) > 0 {
+		return errors.New("cannot delete after ordering has started")
+	}
+	return s.proposals.DeleteProposalByCreator(proposalID, memberID)
+}
+
+func (s *ProposalService) AddOption(proposalID, memberID int64, merchantID string, useProposalTicket bool) (*models.ProposalOption, error) {
 	proposal, err := s.proposals.GetProposal(proposalID)
 	if err != nil {
 		return nil, err
@@ -129,11 +157,17 @@ func (s *ProposalService) AddOption(proposalID, memberID int64, merchantID strin
 		if opt.MerchantID == merchantID {
 			return nil, errors.New("merchant already proposed")
 		}
+	}
+	memberProposalCount := int64(0)
+	for _, opt := range proposal.Options {
 		if opt.ProposerMember == memberID {
-			return nil, errors.New("you already proposed an option for this proposal")
+			memberProposalCount++
 		}
 	}
-	opt, err := s.proposals.InsertProposalOption(proposalID, memberID, merchant.ID, merchant.Name, member.DisplayName, optionTokenCost)
+	if memberProposalCount >= 2 {
+		return nil, errors.New("每位成員最多只能提案兩間店家")
+	}
+	opt, err := s.proposals.InsertProposalOption(proposalID, memberID, merchant.ID, merchant.Name, member.DisplayName, optionTokenCost, useProposalTicket)
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicateOption) {
 			return nil, errors.New("you already proposed an option for this proposal")
@@ -143,7 +177,7 @@ func (s *ProposalService) AddOption(proposalID, memberID int64, merchantID strin
 	return opt, nil
 }
 
-func (s *ProposalService) Vote(proposalID, memberID, optionID, tokenAmount int64) (*models.Proposal, error) {
+func (s *ProposalService) Vote(proposalID, memberID, optionID, tokenAmount int64, useVoteTicket bool) (*models.Proposal, error) {
 	proposal, err := s.proposals.GetProposal(proposalID)
 	if err != nil {
 		return nil, err
@@ -158,10 +192,13 @@ func (s *ProposalService) Vote(proposalID, memberID, optionID, tokenAmount int64
 	if err != nil {
 		return nil, err
 	}
-	if tokenAmount <= 0 {
+	if !useVoteTicket && tokenAmount <= 0 {
 		return nil, errors.New("tokenAmount must be greater than zero")
 	}
-	if member.TokenBalance < tokenAmount {
+	if useVoteTicket && member.VoteTicketCount <= 0 {
+		return nil, errors.New("目前沒有可用的投票券")
+	}
+	if !useVoteTicket && member.TokenBalance < tokenAmount {
 		return nil, errors.New("insufficient token balance")
 	}
 	found := false
@@ -174,14 +211,12 @@ func (s *ProposalService) Vote(proposalID, memberID, optionID, tokenAmount int64
 	if !found {
 		return nil, errors.New("option not found")
 	}
-	for _, v := range proposal.Votes {
-		if v.MemberID == memberID {
-			return nil, errors.New("you already voted on this proposal")
-		}
+	if useVoteTicket {
+		tokenAmount = 1
 	}
-	if err := s.proposals.RecordVote(proposalID, memberID, optionID, tokenAmount, member.DisplayName); err != nil {
+	if err := s.proposals.RecordVote(proposalID, memberID, optionID, tokenAmount, member.DisplayName, useVoteTicket); err != nil {
 		if errors.Is(err, repository.ErrDuplicateVote) {
-			return nil, errors.New("you already voted on this proposal")
+			return nil, errors.New("投票更新失敗")
 		}
 		return nil, err
 	}
@@ -321,5 +356,5 @@ func validateProposalDeadlines(proposalDeadline, voteDeadline, orderDeadline tim
 }
 
 func isAllowedStageDuration(minutes int64) bool {
-	return minutes >= 10 && minutes <= 90 && minutes%10 == 0
+	return minutes >= 1 && minutes <= 90
 }

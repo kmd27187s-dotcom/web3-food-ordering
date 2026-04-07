@@ -1,11 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Minus, Plus, ShoppingBasket, Wallet } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
   addProposalOption,
+  confirmMemberOrder,
   createProposal,
+  deleteProposal,
   fetchContractInfo,
   fetchGroup,
   fetchGroups,
@@ -13,6 +16,7 @@ import {
   fetchMerchants,
   fetchMerchant,
   fetchProposals,
+  finalizeOrder,
   quoteVote,
   registerPendingTransaction,
   signOrder,
@@ -35,21 +39,30 @@ type GovernanceState = {
 };
 
 type GovernanceTab = "proposing" | "voting" | "ordering";
+type WorkflowStage = "create" | "proposal" | "voting" | "ordering" | "submitted";
 
-const stageDurationOptions = [10, 20, 30, 40, 50, 60, 70, 80, 90] as const;
+const stageDurationOptions = [1, 10, 20, 30, 40, 50, 60, 70, 80, 90] as const;
 const APPROX_TWD_PER_ETH = 120000;
-const tabMeta: Record<GovernanceTab, { title: string; body: string }> = {
-  proposing: {
-    title: "建立提案",
-    body: "設定 round。"
+const stageMeta: Record<WorkflowStage, { title: string; body: string }> = {
+  create: {
+    title: "建立訂單",
+    body: "設定這一輪訂單流程。"
+  },
+  proposal: {
+    title: "建立訂單階段",
+    body: "建立候選店家清單，完成這一輪訂單前置設定。"
   },
   voting: {
-    title: "進行投票",
-    body: "估算後送出。"
+    title: "投票階段",
+    body: "輸入 token 權重後送出。"
   },
   ordering: {
-    title: "完成點餐",
-    body: "確認總額後付款。"
+    title: "點餐階段",
+    body: "選餐、確認總額，再把付款交給 MetaMask。"
+  },
+  submitted: {
+    title: "完成送出訂單階段",
+    body: "查看已送出的訂單進度、狀態與確認接收功能。"
   }
 };
 
@@ -67,9 +80,9 @@ const defaultCreateDraft: CreateDraft = {
   groupId: "",
   title: "",
   maxOptions: "5",
-  proposalMinutes: "20",
-  voteMinutes: "20",
-  orderMinutes: "30",
+  proposalMinutes: "1",
+  voteMinutes: "1",
+  orderMinutes: "1",
   merchantId: ""
 };
 
@@ -78,7 +91,7 @@ export function GovernanceBoard() {
   const [loading, setLoading] = useState(true);
   const [actionPending, setActionPending] = useState(false);
   const [message, setMessage] = useState("");
-  const [activeTab, setActiveTab] = useState<GovernanceTab>("proposing");
+  const [activeStage, setActiveStage] = useState<WorkflowStage>("create");
   const [createDraft, setCreateDraft] = useState<CreateDraft>(defaultCreateDraft);
   const [createMerchantQuery, setCreateMerchantQuery] = useState("");
   const [optionMerchantId, setOptionMerchantId] = useState<Record<number, string>>({});
@@ -182,10 +195,17 @@ export function GovernanceBoard() {
     () => ({
       proposing: state.proposals.filter((proposal) => proposal.status === "proposing"),
       voting: state.proposals.filter((proposal) => proposal.status === "voting"),
-      ordering: state.proposals.filter((proposal) => ["ordering", "awaiting_settlement", "settled"].includes(proposal.status))
+      ordering: state.proposals.filter((proposal) => proposal.status === "ordering"),
+      submitted: state.proposals.filter((proposal) => {
+        const myOrder = safeArray(proposal.orders).find((order) => order.memberId === state.member?.id);
+        return Boolean(myOrder) || ["awaiting_settlement", "settled"].includes(proposal.status);
+      })
     }),
-    [state.proposals]
+    [state.member?.id, state.proposals]
   );
+
+  const activeTab: GovernanceTab =
+    activeStage === "voting" ? "voting" : activeStage === "ordering" || activeStage === "submitted" ? "ordering" : "proposing";
 
   async function handleCreateProposal() {
     if (!createDraft.title.trim() || !createDraft.groupId) return;
@@ -236,8 +256,29 @@ export function GovernanceBoard() {
     }
   }
 
+  async function handleDeleteProposal(proposalId: number) {
+    const confirmed = window.confirm("確定要刪除這個提案 round 嗎？如果目前只有你自己提案，已花費的 token 會一併退回。");
+    if (!confirmed) return;
+    setActionPending(true);
+    setMessage("");
+    try {
+      await deleteProposal(proposalId);
+      await refresh();
+      setMessage("已刪除單人提案 round。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "刪除提案失敗");
+    } finally {
+      setActionPending(false);
+    }
+  }
+
   async function handleVote(proposalId: number, optionId: number) {
-    const tokenAmount = Number(voteTokens[proposalId] || "0");
+    const rawTokenAmount = (voteTokens[proposalId] || "").trim();
+    const tokenAmount = Number(rawTokenAmount);
+    if (!rawTokenAmount || Number.isNaN(tokenAmount) || tokenAmount <= 0) {
+      setMessage("請先輸入大於 0 的投票權重。");
+      return;
+    }
     setActionPending(true);
     setMessage("");
     try {
@@ -252,7 +293,12 @@ export function GovernanceBoard() {
   }
 
   async function handleVoteQuote(proposalId: number) {
-    const tokenAmount = Number(voteTokens[proposalId] || "0");
+    const rawTokenAmount = (voteTokens[proposalId] || "").trim();
+    const tokenAmount = Number(rawTokenAmount);
+    if (!rawTokenAmount || Number.isNaN(tokenAmount) || tokenAmount <= 0) {
+      setVoteQuotes((current) => ({ ...current, [proposalId]: "請先輸入大於 0 的投票權重" }));
+      return;
+    }
     try {
       const quote = await quoteVote(proposalId, tokenAmount);
       setVoteQuotes((current) => ({ ...current, [proposalId]: `${quote.voteWeight} 票重` }));
@@ -261,7 +307,7 @@ export function GovernanceBoard() {
     }
   }
 
-  async function handleOrder(proposal: Proposal) {
+  async function handleOrder(proposal: Proposal, merchant?: Merchant) {
     const items = orderItems[proposal.id] || {};
     const payload = Object.fromEntries(Object.entries(items).filter(([, quantity]) => quantity > 0));
     if (Object.keys(payload).length === 0) {
@@ -276,23 +322,28 @@ export function GovernanceBoard() {
         Boolean(proposal.chainProposalId) &&
         Boolean(result.signature) &&
         isUsableContractAddress(state.contractInfo?.orderContract);
+      const canUseFallbackWalletPay =
+        Boolean(result.signature) &&
+        Boolean(state.contractInfo?.platformTreasury) &&
+        isUsableContractAddress(state.contractInfo?.platformTreasury);
 
-      if (!canUseChainOrder || !result.signature || !proposal.chainProposalId) {
-        setMessage("這一輪尚未配置鏈上支付，暫時無法喚起 MetaMask 扣款。");
+      if (!result.signature) {
+        setMessage("這一輪訂單尚未生成付款簽章，暫時無法喚起 MetaMask。");
         return;
       }
 
-      if (result.signature && proposal.chainProposalId) {
-        const walletClient = await ensureSepoliaWallet();
-        const [walletAddress] = await walletClient.getAddresses();
-        const walletBalanceWei = await getWalletBalanceWei(walletAddress);
-        const requiredBalanceWei = BigInt(result.quote.requiredBalanceWei);
-        if (walletBalanceWei < requiredBalanceWei) {
-          setMessage(
-            `錢包餘額不足，至少需要 ${formatWeiFriendly(result.quote.requiredBalanceWei)}（餐點 ${formatWeiFriendly(result.quote.subtotalWei)} + 預估 gas ${formatWeiFriendly(result.quote.estimatedGasWei)}）。`
-          );
-          return;
-        }
+      const walletClient = await ensureSepoliaWallet();
+      const [walletAddress] = await walletClient.getAddresses();
+      const walletBalanceWei = await getWalletBalanceWei(walletAddress);
+      const requiredBalanceWei = BigInt(result.quote.requiredBalanceWei);
+      if (walletBalanceWei < requiredBalanceWei) {
+        setMessage(
+          `錢包餘額不足，至少需要 ${formatWeiFriendly(result.quote.requiredBalanceWei)}（餐點 ${formatWeiFriendly(result.quote.subtotalWei)} + 預估 gas ${formatWeiFriendly(result.quote.estimatedGasWei)}）。`
+        );
+        return;
+      }
+
+      if (canUseChainOrder && proposal.chainProposalId) {
         const txHash = await walletClient.writeContract({
           address: state.contractInfo!.orderContract as `0x${string}`,
           abi: ORDER_ABI,
@@ -315,11 +366,60 @@ export function GovernanceBoard() {
           walletAddress,
           relatedOrder: result.signature.orderHash
         });
+        await finalizeOrder({
+          proposalId: proposal.id,
+          items: payload,
+          signature: result.signature
+        });
+        setOrderItems((current) => ({ ...current, [proposal.id]: {} }));
         await refresh();
         setMessage(`已喚起 MetaMask 支付 ${formatWeiFriendly(result.quote.subtotalWei)}，交易送出：${txHash.slice(0, 10)}...`);
+        return;
       }
+
+      if (canUseFallbackWalletPay) {
+        const txHash = await walletClient.sendTransaction({
+          to: state.contractInfo!.platformTreasury as `0x${string}`,
+          value: BigInt(result.quote.subtotalWei),
+          account: walletAddress
+        });
+        await registerPendingTransaction({
+          proposalId: proposal.id,
+          action: "pay_order_fallback",
+          txHash,
+          walletAddress,
+          relatedOrder: result.signature.orderHash
+        });
+        await finalizeOrder({
+          proposalId: proposal.id,
+          items: payload,
+          signature: result.signature
+        });
+        setOrderItems((current) => ({ ...current, [proposal.id]: {} }));
+        await refresh();
+        setMessage(
+          `已用 MetaMask 付款到平台中心錢包，交易送出：${txHash.slice(0, 10)}...`
+        );
+        return;
+      }
+
+      setMessage("平台中心錢包尚未配置，請先由管理者綁定收款錢包後再付款。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "點餐失敗");
+    } finally {
+      setActionPending(false);
+    }
+  }
+
+  async function handleConfirmReceived(orderId: number) {
+    setActionPending(true);
+    setMessage("");
+    try {
+      await confirmMemberOrder(orderId);
+      await refresh();
+      setMessage("已確認餐點完成，訂單已送往平台撥款流程。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "確認完成失敗");
     } finally {
       setActionPending(false);
     }
@@ -373,9 +473,9 @@ export function GovernanceBoard() {
       <section className="meal-panel p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="meal-section-heading max-w-none">
-            <p className="meal-kicker">Governance</p>
-            <h1>治理工作台</h1>
-            <p>提案、投票、點餐。</p>
+            <p className="meal-kicker">Ordering workspace</p>
+            <h1>建立訂單工作台</h1>
+            <p>建立訂單、投票、點餐到完成送出訂單，都在同一套流程裡。</p>
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <Stat label="我的 Token" value={`${state.member?.tokenBalance || 0}`} />
@@ -384,25 +484,30 @@ export function GovernanceBoard() {
             <Stat label="鏈上模式" value={isUsableContractAddress(state.contractInfo?.orderContract) ? "Sepolia 已配置" : "本地 fallback"} />
           </div>
         </div>
-      </section>
-
-      <section className="grid gap-5 lg:grid-cols-[0.78fr_1.22fr] lg:items-end">
-        <div className="meal-section-heading max-w-none">
-          <p className="meal-kicker">Current stage</p>
-          <h2>{tabMeta[activeTab].title}</h2>
-          <p>{tabMeta[activeTab].body}</p>
-        </div>
-        <div className="meal-glass-card rounded-[1.6rem] p-3">
-          <div className="grid gap-3 sm:grid-cols-3">
-            <TabButton active={activeTab === "proposing"} onClick={() => setActiveTab("proposing")}>
-              提案
-            </TabButton>
-            <TabButton active={activeTab === "voting"} onClick={() => setActiveTab("voting")}>
-              投票
-            </TabButton>
-            <TabButton active={activeTab === "ordering"} onClick={() => setActiveTab("ordering")}>
-              點餐
-            </TabButton>
+        <div className="mt-8 grid gap-5 lg:grid-cols-[0.78fr_1.22fr] lg:items-end">
+          <div className="meal-section-heading max-w-none">
+            <p className="meal-kicker">Current stage</p>
+            <h2>{stageMeta[activeStage].title}</h2>
+            <p>{stageMeta[activeStage].body}</p>
+          </div>
+          <div className="meal-glass-card rounded-[1.6rem] p-3">
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+              <TabButton active={activeStage === "create"} onClick={() => setActiveStage("create")}>
+                建立訂單
+              </TabButton>
+              <TabButton active={activeStage === "proposal"} onClick={() => setActiveStage("proposal")}>
+                建立訂單階段
+              </TabButton>
+              <TabButton active={activeStage === "voting"} onClick={() => setActiveStage("voting")}>
+                投票階段
+              </TabButton>
+              <TabButton active={activeStage === "ordering"} onClick={() => setActiveStage("ordering")}>
+                點餐階段
+              </TabButton>
+              <TabButton active={activeStage === "submitted"} onClick={() => setActiveStage("submitted")}>
+                完成送出訂單階段
+              </TabButton>
+            </div>
           </div>
         </div>
       </section>
@@ -410,9 +515,9 @@ export function GovernanceBoard() {
       {activeTab === "proposing" ? (
         <>
           <section className="meal-panel p-6 shadow-sm">
-            <p className="meal-kicker">Create round</p>
+            <p className="meal-kicker">Create order flow</p>
             <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-              <Field label="群組">
+              <Field label="群組 (必填)">
                 <select
                   className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={createDraft.groupId}
@@ -426,15 +531,15 @@ export function GovernanceBoard() {
                   ))}
                 </select>
               </Field>
-              <Field label="提案標題">
+              <Field label="訂單標題 (必填)">
                 <input
                   className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={createDraft.title}
                   onChange={(event) => setCreateDraft((current) => ({ ...current, title: event.target.value }))}
-                  placeholder="例：信義辦公室午餐票選"
+                  placeholder="例：信義辦公室午餐訂單"
                 />
               </Field>
-              <Field label="候選名額">
+              <Field label="候選名額 (必填)">
                 <input
                   type="number"
                   min={3}
@@ -444,7 +549,7 @@ export function GovernanceBoard() {
                   onChange={(event) => setCreateDraft((current) => ({ ...current, maxOptions: event.target.value }))}
                 />
               </Field>
-              <Field label="提名時間（分鐘）">
+              <Field label="提名時間（分鐘） (必填)">
                 <select
                   className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={createDraft.proposalMinutes}
@@ -457,7 +562,7 @@ export function GovernanceBoard() {
                   ))}
                 </select>
               </Field>
-              <Field label="投票時間（分鐘）">
+              <Field label="投票時間（分鐘） (必填)">
                 <select
                   className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={createDraft.voteMinutes}
@@ -470,7 +575,7 @@ export function GovernanceBoard() {
                   ))}
                 </select>
               </Field>
-              <Field label="點餐時間（分鐘）">
+              <Field label="點餐時間（分鐘） (必填)">
                 <select
                   className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   value={createDraft.orderMinutes}
@@ -495,22 +600,30 @@ export function GovernanceBoard() {
             </div>
             <div className="mt-5 flex flex-wrap items-center gap-3">
               <Button onClick={handleCreateProposal} disabled={actionPending || !createDraft.title.trim() || !createDraft.groupId}>
-                {actionPending ? "處理中..." : "建立本輪提案"}
+                {actionPending ? "處理中..." : "建立本輪訂單"}
               </Button>
               <p className="text-sm text-muted-foreground">建立 round 消耗 1 token。</p>
             </div>
           </section>
 
-          <Section title="提案期" description="建立候選清單。">
-            {grouped.proposing.length === 0 ? <Empty text="目前沒有進行中的提案期 round。" /> : null}
+          <Section title="建立訂單階段" description="建立候選店家清單，完成這一輪訂單前置設定。">
+            {grouped.proposing.length === 0 ? <Empty text="目前沒有進行中的建立訂單階段。" /> : null}
             <div className="grid gap-5 xl:grid-cols-2">
               {grouped.proposing.map((proposal) => (
                 <ProposalCard key={proposal.id} proposal={proposal}>
                   <div className="space-y-4">
-                    <OptionList options={proposal.options} />
+                    {proposal.createdBy === state.member?.id &&
+                    safeArray(proposal.options).every((option) => option.proposerMemberId === state.member?.id) ? (
+                      <div className="flex justify-end">
+                        <Button variant="secondary" onClick={() => handleDeleteProposal(proposal.id)} disabled={actionPending}>
+                          刪除這輪訂單
+                        </Button>
+                      </div>
+                    ) : null}
+                    <OptionList options={proposal.options} showVoteWeight={false} />
                     <div className="space-y-3">
                       <MerchantPicker
-                        label="提名店家"
+                        label="提名店家 (必填)"
                         merchants={merchants}
                         selectedMerchantId={optionMerchantId[proposal.id] || ""}
                         query={optionMerchantQuery[proposal.id] || ""}
@@ -534,7 +647,7 @@ export function GovernanceBoard() {
       ) : null}
 
       {activeTab === "voting" ? (
-        <Section title="投票期" description="輸入 token 權重後送出。">
+        <Section title="投票階段" description="輸入 token 權重後送出。">
           {grouped.voting.length === 0 ? <Empty text="目前沒有進行中的投票期 round。" /> : null}
           <div className="grid gap-5 xl:grid-cols-2">
             {grouped.voting.map((proposal) => (
@@ -546,13 +659,14 @@ export function GovernanceBoard() {
                       ? ` 你目前已投入 ${proposal.currentVoteTokenAmount} Token，個人票重 ${proposal.currentVoteWeight}。`
                       : " 你目前還沒有投票。"}
                   </div>
-                  <Field label="這輪投票的 token 權重">
+                  <Field label="這輪投票的 token 權重 (必填)">
                     <div className="flex gap-3">
                       <input
                         type="number"
                         min={1}
                         className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                        value={voteTokens[proposal.id] || "0"}
+                        value={voteTokens[proposal.id] ?? ""}
+                        placeholder="輸入權重"
                         onChange={(event) => setVoteTokens((current) => ({ ...current, [proposal.id]: event.target.value }))}
                       />
                       <Button variant="secondary" onClick={() => handleVoteQuote(proposal.id)}>
@@ -584,21 +698,32 @@ export function GovernanceBoard() {
       ) : null}
 
       {activeTab === "ordering" ? (
-        <Section title="點餐期 / 結算期" description="選餐、確認總額，再把付款交給 MetaMask。">
-          {grouped.ordering.length === 0 ? <Empty text="目前沒有可點餐或已結算的 round。" /> : null}
+        <Section
+          title={activeStage === "ordering" ? "點餐階段" : "完成送出訂單階段"}
+          description={activeStage === "ordering" ? "選餐、確認總額，再把付款交給 MetaMask。" : "查看你已送出的訂單進度、狀態與確認接收功能。"}
+        >
+          {(activeStage === "ordering" ? grouped.ordering : grouped.submitted).length === 0 ? (
+            <Empty text={activeStage === "ordering" ? "目前沒有可點餐的 round。" : "目前沒有已送出的訂單資料。"} />
+          ) : null}
           <div className="grid gap-5 xl:grid-cols-2">
-            {grouped.ordering.map((proposal) => {
+            {(activeStage === "ordering" ? grouped.ordering : grouped.submitted).map((proposal) => {
               const winner = safeArray(proposal.options).find((option) => option.id === proposal.winnerOptionId);
               const merchant = winner ? menus[winner.merchantId] : undefined;
               const myOrder = safeArray(proposal.orders).find((order) => order.memberId === state.member?.id);
               const selectedItems = merchant?.menu
                 ? merchant.menu.filter((item) => (orderItems[proposal.id]?.[item.id] || 0) > 0)
                 : [];
+              const selectedPortions = selectedItems.reduce(
+                (sum, item) => sum + (orderItems[proposal.id]?.[item.id] || 0),
+                0
+              );
               const selectedSubtotalWei = selectedItems.reduce((total, item) => {
                 const quantity = orderItems[proposal.id]?.[item.id] || 0;
                 return total + BigInt(item.priceWei) * BigInt(quantity);
               }, BigInt(0));
-              const canSubmitOrder = proposal.status === "ordering" && selectedItems.length > 0;
+              const hasPaidOrder = Boolean(myOrder);
+              const canSubmitOrder = proposal.status === "ordering" && selectedItems.length > 0 && !hasPaidOrder;
+              const canUseChainOrder = isUsableContractAddress(state.contractInfo?.orderContract);
               return (
                 <ProposalCard key={proposal.id} proposal={proposal}>
                   <div className="space-y-4">
@@ -616,42 +741,98 @@ export function GovernanceBoard() {
                       ) : null}
                     </div>
                     {proposal.status === "ordering" && merchant?.menu?.length ? (
-                      <div className="space-y-3">
-                        {merchant.menu.map((item) => (
-                        <div key={item.id} className="flex items-center justify-between gap-4 rounded-[1.35rem] border border-[rgba(220,193,177,0.36)] bg-[rgba(255,255,255,0.68)] px-4 py-4 backdrop-blur">
-                            <div>
-                              <p className="font-semibold">{item.name}</p>
-                              <p className="text-sm text-muted-foreground">{formatWeiFriendly(item.priceWei)}</p>
-                            </div>
-                            <div className="flex items-center gap-4">
-                              <div className="min-w-[9rem] text-right">
-                                <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">項目總額</p>
-                                <p className="mt-1 text-sm font-semibold text-foreground">
-                                  {formatWeiFriendly(BigInt(item.priceWei) * BigInt(orderItems[proposal.id]?.[item.id] || 0))}
-                                </p>
+                      <div className="space-y-4">
+                        <div className="grid gap-3">
+                          {merchant.menu.map((item) => {
+                            const quantity = orderItems[proposal.id]?.[item.id] || 0;
+                            return (
+                              <div
+                                key={item.id}
+                                className="rounded-[1.35rem] border border-[rgba(220,193,177,0.36)] bg-[rgba(255,255,255,0.68)] px-4 py-4 backdrop-blur"
+                              >
+                                <div className="flex flex-wrap items-center justify-between gap-4">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="font-semibold">{item.name}</p>
+                                    <p className="mt-1 text-sm text-muted-foreground">{formatWeiFriendly(item.priceWei)}</p>
+                                  </div>
+                                  <div className="flex items-center gap-3">
+                                    <Button
+                                      type="button"
+                                      variant="secondary"
+                                      className="h-11 w-11 rounded-full px-0"
+                                      onClick={() => setOrderQuantity(proposal.id, item.id, quantity - 1)}
+                                      disabled={actionPending || quantity <= 0}
+                                    >
+                                      <Minus className="h-4 w-4" />
+                                    </Button>
+                                    <div className="min-w-[3rem] text-center">
+                                      <p className="text-[11px] font-black uppercase tracking-[0.16em] text-muted-foreground">
+                                        數量
+                                      </p>
+                                      <p className="mt-1 text-lg font-semibold text-foreground">{quantity}</p>
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      className="h-11 w-11 rounded-full px-0"
+                                      onClick={() => setOrderQuantity(proposal.id, item.id, quantity + 1)}
+                                      disabled={actionPending}
+                                    >
+                                      <Plus className="h-4 w-4" />
+                                    </Button>
+                                  </div>
+                                </div>
+                                <div className="mt-4 flex items-center justify-between border-t border-[rgba(220,193,177,0.32)] pt-4 text-sm">
+                                  <span className="text-muted-foreground">項目總額</span>
+                                  <span className="font-semibold text-foreground">
+                                    {formatMenuItemSubtotal(item.priceWei, quantity)}
+                                  </span>
+                                </div>
                               </div>
-                              <input
-                                type="number"
-                                min={0}
-                                aria-label={`${item.name} 數量`}
-                                className="w-24 rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                value={String(orderItems[proposal.id]?.[item.id] || 0)}
-                                onChange={(event) => setOrderQuantity(proposal.id, item.id, Number(event.target.value))}
-                              />
-                            </div>
-                          </div>
-                        ))}
+                            );
+                          })}
+                        </div>
                         <div className="rounded-[1.35rem] border border-[rgba(194,119,60,0.28)] bg-[rgba(194,119,60,0.08)] px-4 py-4">
-                          <p className="meal-kicker">Order summary</p>
-                          <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex flex-wrap items-start justify-between gap-4">
                             <div>
-                              <p className="text-sm text-muted-foreground">已選 {selectedItems.length} 項餐點，送出前會先檢查餘額。</p>
+                              <p className="meal-kicker">Order summary</p>
+                              <p className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+                                <ShoppingBasket className="h-4 w-4" />
+                                已選 {selectedItems.length} 項、共 {selectedPortions} 份
+                              </p>
                               <p className="mt-2 text-lg font-semibold text-foreground">{formatWeiFriendly(selectedSubtotalWei)}</p>
+                              <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                <Wallet className="h-4 w-4" />
+                                {canUseChainOrder ? "本輪會喚起 MetaMask 進行 Sepolia 合約支付。" : "本輪會先付款到平台中心錢包，待後續結算撥款給店家。"}
+                              </p>
                             </div>
-                            <Button onClick={() => handleOrder(proposal)} disabled={actionPending || !canSubmitOrder}>
-                              送出點餐並前往錢包支付
+                            <Button onClick={() => handleOrder(proposal, merchant)} disabled={actionPending || !canSubmitOrder}>
+                              {hasPaidOrder ? "已付款完成" : "送出點餐並前往錢包支付"}
                             </Button>
                           </div>
+                          {hasPaidOrder ? (
+                            <p className="mt-4 text-sm text-[hsl(142_54%_32%)]">
+                              這一輪你已經完成付款，若要查看進度請看下方「我的訂單」。
+                            </p>
+                          ) : null}
+                          {selectedItems.length ? (
+                            <div className="mt-4 rounded-[1.2rem] border border-[rgba(194,119,60,0.18)] bg-white/70 px-4 py-4">
+                              <div className="space-y-2 text-sm">
+                                {selectedItems.map((item) => {
+                                  const quantity = orderItems[proposal.id]?.[item.id] || 0;
+                                  return (
+                                    <div key={`summary-${proposal.id}-${item.id}`} className="flex items-center justify-between gap-4">
+                                      <span className="text-foreground">
+                                        {item.name} x {quantity}
+                                      </span>
+                                      <span className="font-semibold text-foreground">
+                                        {formatMenuItemSubtotal(item.priceWei, quantity)}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
                       </div>
                     ) : proposal.status === "ordering" ? (
@@ -662,10 +843,16 @@ export function GovernanceBoard() {
                     {myOrder ? (
                       <div className="meal-soft-panel px-4 py-4">
                         <p className="meal-kicker">我的訂單</p>
-                        <p className="mt-2 font-semibold">{myOrder.status}</p>
+                        <p className="mt-2 font-semibold">{formatOrderStatus(myOrder.status)}</p>
+                        <p className="mt-2 text-xs text-muted-foreground">{formatOrderDetail(myOrder.status)}</p>
                         <p className="mt-2 text-sm text-muted-foreground">
                           {safeArray(myOrder.items).map((item) => `${item.name} x${item.quantity}`).join(" · ")} · {formatWeiFriendly(myOrder.amountWei)}
                         </p>
+                        {myOrder.status === "merchant_completed" ? (
+                          <Button className="mt-4" disabled={actionPending} onClick={() => handleConfirmReceived(myOrder.id)}>
+                            確認已完成取餐
+                          </Button>
+                        ) : null}
                       </div>
                     ) : null}
                     {safeArray(proposal.orders).length ? (
@@ -675,7 +862,9 @@ export function GovernanceBoard() {
                           {safeArray(proposal.orders).map((order) => (
                             <div key={order.id} className="flex items-center justify-between gap-4">
                               <span>{order.memberName}</span>
-                              <span className="text-muted-foreground">{formatWeiFriendly(order.amountWei)}</span>
+                              <span className="text-muted-foreground">
+                                {formatOrderStatus(order.status)} · {formatWeiFriendly(order.amountWei)}
+                              </span>
                             </div>
                           ))}
                         </div>
@@ -714,7 +903,7 @@ function ProposalCard(props: { proposal: Proposal; children: React.ReactNode }) 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="text-sm uppercase tracking-[0.2em] text-muted-foreground">
-            {props.proposal.mealPeriod} · 群組 {props.proposal.groupId}
+            群組 {props.proposal.groupId}
           </p>
           <h2 className="mt-2 font-[var(--font-heading)] text-2xl font-bold">{props.proposal.title}</h2>
           <p className="mt-2 text-sm text-muted-foreground">
@@ -731,7 +920,7 @@ function ProposalCard(props: { proposal: Proposal; children: React.ReactNode }) 
   );
 }
 
-function OptionList({ options }: { options: ProposalOption[] }) {
+function OptionList({ options, showVoteWeight = true }: { options: ProposalOption[]; showVoteWeight?: boolean }) {
   if (!safeArray(options).length) {
     return <Empty text="目前還沒有候選店家。" compact />;
   }
@@ -744,7 +933,7 @@ function OptionList({ options }: { options: ProposalOption[] }) {
               <p className="font-semibold">{option.merchantName}</p>
               <p className="text-sm text-muted-foreground">{option.merchantId}</p>
             </div>
-            <span className="text-sm text-muted-foreground">{option.weightedVotes} 票重</span>
+            {showVoteWeight ? <span className="text-sm text-muted-foreground">{option.weightedVotes} 票重</span> : null}
           </div>
         </div>
       ))}
@@ -821,6 +1010,48 @@ function formatWeiFriendly(value: string | number | bigint) {
   return `${formatEth(value)} / ${formatApproxTWD(value)}`;
 }
 
+function formatMenuItemSubtotal(priceWei: string | number | bigint, quantity: number) {
+  return formatWeiFriendly(BigInt(priceWei) * BigInt(quantity));
+}
+
+function formatOrderStatus(status: string) {
+  switch (status) {
+    case "payment_received":
+    case "paid_local":
+    case "paid_onchain":
+      return "付款完成";
+    case "merchant_accepted":
+      return "店家已接單";
+    case "merchant_completed":
+      return "店家已做完";
+    case "ready_for_payout":
+      return "平台撥款中";
+    case "platform_paid":
+      return "店家已收款";
+    default:
+      return status;
+  }
+}
+
+function formatOrderDetail(status: string) {
+  switch (status) {
+    case "payment_received":
+    case "paid_local":
+    case "paid_onchain":
+      return "款項已進入平台中心錢包，等待店家接單。";
+    case "merchant_accepted":
+      return "店家已接單，正在準備你的餐點。";
+    case "merchant_completed":
+      return "店家已標記餐點完成，請確認是否已取餐。";
+    case "ready_for_payout":
+      return "你已確認完成，平台正在安排把款項撥給店家。";
+    case "platform_paid":
+      return "平台已完成撥款，這筆訂單已結案。";
+    default:
+      return "";
+  }
+}
+
 function safeArray<T>(value: T[] | null | undefined) {
   return Array.isArray(value) ? value : [];
 }
@@ -861,14 +1092,17 @@ function MerchantPicker(props: MerchantPickerProps) {
   }
 
   return (
-    <Field label={label}>
-      <div className="space-y-3">
-        <input
-          className="w-full rounded-[1.2rem] border border-[rgba(220,193,177,0.42)] bg-[rgba(255,255,255,0.72)] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          value={query}
-          onChange={(event) => handleChange(event.target.value)}
-          placeholder="搜尋店名或 merchant id"
-        />
+      <Field label={label}>
+        <div className="space-y-3">
+        <div className="grid gap-2 text-sm">
+          <span className="font-semibold text-foreground">{label.includes("選填") ? "搜尋關鍵字 (選填)" : "搜尋關鍵字 (必填)"}</span>
+          <input
+            className="w-full rounded-[1.2rem] border border-[rgba(220,193,177,0.42)] bg-[rgba(255,255,255,0.72)] px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={query}
+            onChange={(event) => handleChange(event.target.value)}
+            placeholder="搜尋店名或 merchant id"
+          />
+        </div>
         {filteredMerchants.length ? (
           <div className="rounded-[1.2rem] border border-[rgba(220,193,177,0.36)] bg-[rgba(255,255,255,0.68)] p-2 backdrop-blur">
             <div className="grid gap-2">

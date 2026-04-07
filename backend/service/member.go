@@ -112,6 +112,16 @@ func (s *MemberService) LinkWallet(memberID int64, wallet string) (*models.Membe
 	return s.repo.MemberByID(memberID)
 }
 
+func (s *MemberService) UnlinkWallet(memberID int64) (*models.Member, error) {
+	if memberID <= 0 {
+		return nil, errors.New("member id is required")
+	}
+	if err := s.repo.UpdateMemberWallet(memberID, ""); err != nil {
+		return nil, err
+	}
+	return s.repo.MemberByID(memberID)
+}
+
 func (s *MemberService) GetBySession(token string) (*models.Member, error) {
 	return s.repo.MemberBySession(token)
 }
@@ -132,12 +142,23 @@ func (s *MemberService) GetByEmail(email string) (*models.Member, error) {
 	return s.repo.MemberByEmail(normalizeEmail(email))
 }
 
+func (s *MemberService) ListMemberOrders(memberID int64) ([]*models.Order, error) {
+	return s.repo.ListMemberOrders(memberID)
+}
+
 func (s *MemberService) CreateMember(email, passwordHash, displayName string, isAdmin bool, tokenBalance int64, avatarURL string) (int64, error) {
 	return s.repo.CreateMember(normalizeEmail(email), passwordHash, displayName, isAdmin, tokenBalance, avatarURL)
 }
 
 func (s *MemberService) SetSubscriptionExpiry(memberID int64, expiresAt time.Time) error {
 	return s.repo.SetSubscriptionExpiry(memberID, expiresAt)
+}
+
+func (s *MemberService) CancelSubscription(memberID int64) (*models.Member, error) {
+	if err := s.repo.SetSubscriptionExpiry(memberID, time.Now().UTC().Add(-time.Minute)); err != nil {
+		return nil, err
+	}
+	return s.repo.MemberByID(memberID)
 }
 
 func (s *MemberService) StartWalletAuth(wallet string) (*models.WalletAuthChallenge, error) {
@@ -215,6 +236,9 @@ func (s *MemberService) VerifyWalletAuth(wallet, signature, displayName, inviteC
 			if rewardErr := s.repo.AddClaimableTickets(memberID, 1); rewardErr != nil {
 				return nil, "", false, false, rewardErr
 			}
+			if usageErr := s.repo.RecordRegistrationInviteUsage(strings.TrimSpace(inviteCode), inviter.ID, memberID); usageErr != nil {
+				return nil, "", false, false, usageErr
+			}
 		}
 		member, err = s.repo.MemberByID(memberID)
 		if err != nil {
@@ -238,16 +262,20 @@ func (s *MemberService) VerifyWalletAuth(wallet, signature, displayName, inviteC
 	return member, token, created, dailyLoginRewardGranted, err
 }
 
-func (s *MemberService) ClaimTickets(memberID int64) (*models.Member, int64, error) {
-	proposalTickets, err := s.repo.ClaimTickets(memberID)
+func (s *MemberService) ClaimTickets(memberID int64) (*models.Member, int64, int64, int64, error) {
+	proposalTickets, voteTickets, createOrderTickets, err := s.repo.ClaimTickets(memberID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, 0, err
 	}
 	member, err := s.repo.MemberByID(memberID)
 	if err != nil {
-		return nil, 0, err
+		return nil, 0, 0, 0, err
 	}
-	return member, proposalTickets, nil
+	return member, proposalTickets, voteTickets, createOrderTickets, nil
+}
+
+func (s *MemberService) ListRegistrationInviteUsages(memberID int64) ([]*models.RegistrationInviteUsage, error) {
+	return s.repo.ListRegistrationInviteUsages(memberID)
 }
 
 // --- private helpers ---

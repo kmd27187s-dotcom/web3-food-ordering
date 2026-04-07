@@ -3,15 +3,16 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-import { clearStoredToken, fetchMe, getStoredToken } from "@/lib/api";
-import { clearWalletConnection } from "@/lib/wallet-auth";
+import { fetchMe, getStoredToken } from "@/lib/api";
 
 export function SessionGate({
   children,
-  requireSubscription = false
+  requireSubscription = false,
+  allowedRole = "member"
 }: {
   children: React.ReactNode;
   requireSubscription?: boolean;
+  allowedRole?: "member" | "admin";
 }) {
   const router = useRouter();
   const [ready, setReady] = useState(false);
@@ -20,23 +21,28 @@ export function SessionGate({
     let active = true;
 
     async function verifyAccess() {
-      const navigation = typeof window !== "undefined" ? window.performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined : undefined;
-      if (navigation?.type === "reload") {
-        clearStoredToken();
-        clearWalletConnection();
-        router.replace("/");
-        return;
-      }
       if (!getStoredToken()) {
         router.replace("/");
         return;
       }
-      if (!requireSubscription) {
-        if (active) setReady(true);
-        return;
-      }
       try {
         const member = await fetchMe();
+        if (allowedRole === "admin") {
+          if (!member.isAdmin) {
+            router.replace("/member");
+            return;
+          }
+          if (active) setReady(true);
+          return;
+        }
+        if (member.isAdmin) {
+          router.replace("/admin");
+          return;
+        }
+        if (!requireSubscription) {
+          if (active) setReady(true);
+          return;
+        }
         if (!member.subscriptionActive) {
           router.replace("/subscribe");
           return;

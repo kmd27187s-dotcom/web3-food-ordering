@@ -48,20 +48,21 @@ var (
 )
 
 type Server struct {
-	cfg         config.Config
-	members     *service.MemberService
-	proposals   *service.ProposalService
-	orders      *service.OrderService
-	leaderboard *service.LeaderboardService
-	chain       *blockchain.Client
+	cfg          config.Config
+	members      *service.MemberService
+	proposals    *service.ProposalService
+	orders       *service.OrderService
+	leaderboard  *service.LeaderboardService
+	chain        *blockchain.Client
 	merchantRepo repository.MerchantRepo
-	chainRepo   repository.ChainRepo
-	txRepo      repository.TransactionRepo
-	usageRepo   repository.UsageRepo
-	groupRepo   repository.GroupRepo
-	faucetRepo  repository.FaucetRepo
-	adminRepo   repository.AdminRepo
-	rateLimiter *rateLimiter
+	orderRepo    repository.OrderRepo
+	chainRepo    repository.ChainRepo
+	txRepo       repository.TransactionRepo
+	usageRepo    repository.UsageRepo
+	groupRepo    repository.GroupRepo
+	faucetRepo   repository.FaucetRepo
+	adminRepo    repository.AdminRepo
+	rateLimiter  *rateLimiter
 }
 
 func NewServer(cfg config.Config, store repository.Store, chain *blockchain.Client) *Server {
@@ -70,20 +71,21 @@ func NewServer(cfg config.Config, store repository.Store, chain *blockchain.Clie
 	orders := service.NewOrderService(store, store, store, store, chain)
 	leaderboard := service.NewLeaderboardService(store)
 	return &Server{
-		cfg:         cfg,
-		members:     members,
-		proposals:   proposals,
-		orders:      orders,
-		leaderboard: leaderboard,
-		chain:       chain,
+		cfg:          cfg,
+		members:      members,
+		proposals:    proposals,
+		orders:       orders,
+		leaderboard:  leaderboard,
+		chain:        chain,
 		merchantRepo: store,
-		chainRepo:   store,
-		txRepo:      store,
-		usageRepo:   store,
-		groupRepo:   store,
-		faucetRepo:  store,
-		adminRepo:   store,
-		rateLimiter: newRateLimiter(),
+		orderRepo:    store,
+		chainRepo:    store,
+		txRepo:       store,
+		usageRepo:    store,
+		groupRepo:    store,
+		faucetRepo:   store,
+		adminRepo:    store,
+		rateLimiter:  newRateLimiter(),
 	}
 }
 
@@ -91,11 +93,17 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /contract", s.handleContractInfo)
+	mux.HandleFunc("POST /auth/login", s.withConfiguredRateLimit(loginRateLimitKey, s.cfg.RateLimit.Login, loginRateLimitMax, loginRateLimitWindow, s.handlePasswordLogin))
 	mux.HandleFunc("POST /auth/wallet/challenge", s.withConfiguredRateLimit(registerRateLimitKey, s.cfg.RateLimit.Register, registerRateLimitMax, registerRateLimitWindow, s.handleWalletChallenge))
 	mux.HandleFunc("POST /auth/wallet/verify", s.withConfiguredRateLimit(loginRateLimitKey, s.cfg.RateLimit.Login, loginRateLimitMax, loginRateLimitWindow, s.handleWalletVerify))
 	mux.HandleFunc("POST /api/auth/wallet-connect/challenge", s.withConfiguredRateLimit(registerRateLimitKey, s.cfg.RateLimit.Register, registerRateLimitMax, registerRateLimitWindow, s.handleWalletChallenge))
 	mux.HandleFunc("POST /api/auth/wallet-connect", s.withConfiguredRateLimit(loginRateLimitKey, s.cfg.RateLimit.Login, loginRateLimitMax, loginRateLimitWindow, s.handleWalletVerify))
 	mux.HandleFunc("GET /members/me", s.withAuth(s.handleMe))
+	mux.HandleFunc("GET /members/me/orders", s.withSubscribed(s.handleMemberOrders))
+	mux.HandleFunc("GET /members/me/invite-usage", s.withSubscribed(s.handleMemberInviteUsage))
+	mux.HandleFunc("POST /members/me/wallet", s.withAuth(s.handleMemberUpdateWallet))
+	mux.HandleFunc("DELETE /members/me/wallet", s.withAuth(s.handleMemberUnlinkWallet))
+	mux.HandleFunc("POST /members/me/subscription/cancel", s.withAuth(s.handleCancelSubscription))
 	mux.HandleFunc("GET /members/{id}", s.handleMemberProfile)
 	mux.HandleFunc("GET /members/{id}/profile", s.handleMemberProfile)
 	mux.HandleFunc("GET /api/members/profile", s.withAuth(s.handleMemberProfileByWallet))
@@ -103,12 +111,35 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /members/tickets/claim", s.withAuth(s.handleClaimTickets))
 	mux.HandleFunc("GET /merchants", s.handleListMerchants)
 	mux.HandleFunc("GET /merchants/{id}", s.handleGetMerchant)
+	mux.HandleFunc("GET /merchants/{id}/detail", s.handleGetMerchantDetail)
+	mux.HandleFunc("GET /merchants/{id}/reviews", s.handleListMerchantReviews)
+	mux.HandleFunc("POST /merchants/{id}/reviews", s.withSubscribed(s.handleCreateMerchantReview))
 	mux.HandleFunc("POST /admin/merchants", s.withAdmin(s.handleAdminUpsertMerchant))
 	mux.HandleFunc("POST /admin/merchants/{id}/menu", s.withAdmin(s.handleAdminUpsertMenuItem))
 	mux.HandleFunc("POST /admin/merchants/import", s.withAdmin(s.handleAdminImportMerchantCSV))
+	mux.HandleFunc("GET /merchant/dashboard", s.withAuth(s.handleMerchantDashboard))
+	mux.HandleFunc("POST /merchant/claim", s.withAuth(s.handleMerchantClaim))
+	mux.HandleFunc("POST /merchant/profile", s.withAuth(s.handleMerchantUpsertProfile))
+	mux.HandleFunc("POST /merchant/wallet", s.withAuth(s.handleMerchantUpdateWallet))
+	mux.HandleFunc("DELETE /merchant/wallet", s.withAuth(s.handleMerchantUnlinkWallet))
+	mux.HandleFunc("POST /merchant/delist", s.withAuth(s.handleMerchantRequestDelist))
+	mux.HandleFunc("DELETE /merchant/delist", s.withAuth(s.handleMerchantCancelDelist))
+	mux.HandleFunc("POST /merchant/orders/{id}/accept", s.withAuth(s.handleMerchantAcceptOrder))
+	mux.HandleFunc("POST /merchant/orders/{id}/complete", s.withAuth(s.handleMerchantCompleteOrder))
+	mux.HandleFunc("POST /merchant/menu-changes", s.withAuth(s.handleMerchantCreateMenuChange))
+	mux.HandleFunc("DELETE /merchant/menu-changes/{id}", s.withAuth(s.handleMerchantWithdrawMenuChange))
+	mux.HandleFunc("GET /admin/dashboard", s.withAdmin(s.handleAdminDashboard))
+	mux.HandleFunc("GET /admin/insights", s.withAdmin(s.handleAdminInsights))
+	mux.HandleFunc("GET /admin/menu-changes", s.withAdmin(s.handleAdminMenuChanges))
+	mux.HandleFunc("GET /admin/groups/{id}", s.withAdmin(s.handleAdminGroupDetail))
+	mux.HandleFunc("POST /admin/menu-changes/{id}/review", s.withAdmin(s.handleAdminReviewMenuChange))
+	mux.HandleFunc("POST /admin/merchant-delists/{id}/review", s.withAdmin(s.handleAdminReviewMerchantDelist))
+	mux.HandleFunc("POST /admin/platform-treasury", s.withAdmin(s.handleAdminUpdatePlatformTreasury))
+	mux.HandleFunc("POST /admin/orders/{id}/payout", s.withAdmin(s.handleAdminMarkOrderPaid))
 	mux.HandleFunc("GET /proposals", s.withSubscribed(s.handleListProposals))
 	mux.HandleFunc("POST /proposals", s.withSubscribed(s.handleCreateProposal))
 	mux.HandleFunc("GET /proposals/{id}", s.withSubscribed(s.handleGetProposal))
+	mux.HandleFunc("DELETE /proposals/{id}", s.withSubscribed(s.handleDeleteProposal))
 	mux.HandleFunc("POST /proposals/{id}/options", s.withSubscribed(s.handleAddOption))
 	mux.HandleFunc("POST /proposals/{id}/options/quote", s.withSubscribed(s.handleOptionQuote))
 	mux.HandleFunc("POST /proposals/{id}/votes", s.withSubscribed(s.handleVote))
@@ -117,6 +148,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /proposals/{id}/claim", s.withSubscribed(s.handleClaimReward))
 	mux.HandleFunc("POST /orders/quote", s.withSubscribed(s.handleOrderQuote))
 	mux.HandleFunc("POST /orders/sign", s.withSubscribed(s.handleOrderSign))
+	mux.HandleFunc("POST /orders/finalize", s.withSubscribed(s.handleFinalizeOrder))
+	mux.HandleFunc("POST /orders/{id}/confirm-complete", s.withSubscribed(s.handleMemberConfirmOrderComplete))
 	mux.HandleFunc("GET /leaderboard", s.handleLeaderboard)
 	mux.HandleFunc("GET /indexer/status", s.handleIndexerStatus)
 	mux.HandleFunc("GET /indexer/events", s.handleIndexedEvents)
@@ -129,7 +162,11 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /groups", s.withSubscribed(s.handleCreateGroup))
 	mux.HandleFunc("GET /groups", s.withSubscribed(s.handleListGroups))
 	mux.HandleFunc("GET /groups/{id}", s.withSubscribed(s.handleGetGroup))
+	mux.HandleFunc("GET /groups/{id}/detail", s.withSubscribed(s.handleGetGroupDetail))
+	mux.HandleFunc("GET /groups/{id}/invite-usage", s.withSubscribed(s.handleGroupInviteUsage))
+	mux.HandleFunc("POST /groups/{id}", s.withSubscribed(s.handleUpdateGroup))
 	mux.HandleFunc("POST /groups/{id}/invite", s.withSubscribed(s.handleCreateGroupInvite))
+	mux.HandleFunc("POST /groups/{id}/members/{memberId}/remove", s.withSubscribed(s.handleRemoveGroupMember))
 	mux.HandleFunc("POST /groups/{id}/leave", s.withSubscribed(s.handleLeaveGroup))
 	mux.HandleFunc("POST /join/{code}", s.withSubscribed(s.handleJoinGroup))
 	mux.HandleFunc("POST /tokens/claim", s.withAuth(s.handleClaimFaucet))
@@ -194,14 +231,16 @@ func (s *Server) handleWalletVerify(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleClaimTickets(w http.ResponseWriter, r *http.Request, memberID int64) {
-	member, proposalTickets, err := s.members.ClaimTickets(memberID)
+	member, proposalTickets, voteTickets, createOrderTickets, err := s.members.ClaimTickets(memberID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"member":                 member,
-		"claimedProposalTickets": proposalTickets,
+		"member":                    member,
+		"claimedProposalTickets":    proposalTickets,
+		"claimedVoteTickets":        voteTickets,
+		"claimedCreateOrderTickets": createOrderTickets,
 	})
 }
 
@@ -214,10 +253,111 @@ func (s *Server) handleListMerchants(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, merchants)
 }
 
+func (s *Server) handleGetMerchantDetail(w http.ResponseWriter, r *http.Request) {
+	detail, err := s.merchantRepo.GetMerchantDetail(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+func (s *Server) handleListMerchantReviews(w http.ResponseWriter, r *http.Request) {
+	reviews, err := s.merchantRepo.ListMerchantReviews(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, reviews)
+}
+
+func (s *Server) handleCreateMerchantReview(w http.ResponseWriter, r *http.Request, memberID int64) {
+	member := authenticatedMember(r)
+	if member == nil || member.ID != memberID {
+		writeError(w, http.StatusUnauthorized, "invalid session")
+		return
+	}
+	var body struct {
+		Rating  int64  `json:"rating"`
+		Comment string `json:"comment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	review, err := s.merchantRepo.CreateMerchantReview(&models.MerchantReview{
+		MerchantID: r.PathValue("id"),
+		MemberID:   memberID,
+		MemberName: member.DisplayName,
+		Rating:     body.Rating,
+		Comment:    body.Comment,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, review)
+}
+
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request, memberID int64) {
 	member := authenticatedMember(r)
 	if member == nil || member.ID != memberID {
 		writeError(w, http.StatusUnauthorized, "invalid session")
+		return
+	}
+	writeJSON(w, http.StatusOK, member)
+}
+
+func (s *Server) handleMemberOrders(w http.ResponseWriter, r *http.Request, memberID int64) {
+	orders, err := s.members.ListMemberOrders(memberID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, &models.MemberOrderHistory{Orders: orders})
+}
+
+func (s *Server) handleMemberInviteUsage(w http.ResponseWriter, r *http.Request, memberID int64) {
+	items, err := s.members.ListRegistrationInviteUsages(memberID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if items == nil {
+		items = []*models.RegistrationInviteUsage{}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleMemberUpdateWallet(w http.ResponseWriter, r *http.Request, memberID int64) {
+	var body struct {
+		WalletAddress string `json:"walletAddress"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	member, err := s.members.LinkWallet(memberID, body.WalletAddress)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, member)
+}
+
+func (s *Server) handleMemberUnlinkWallet(w http.ResponseWriter, r *http.Request, memberID int64) {
+	member, err := s.members.UnlinkWallet(memberID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, member)
+}
+
+func (s *Server) handleCancelSubscription(w http.ResponseWriter, r *http.Request, memberID int64) {
+	member, err := s.members.CancelSubscription(memberID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, member)
@@ -299,7 +439,9 @@ func (s *Server) handleRegistrationInviteInfo(w http.ResponseWriter, r *http.Req
 		"walletAddress":            member.WalletAddress,
 		"inviteCode":               member.RegistrationInviteCode,
 		"proposalTicketCount":      member.ProposalTicketCount,
+		"voteTicketCount":          member.VoteTicketCount,
 		"claimableProposalTickets": member.ClaimableProposalTickets,
+		"claimableVoteTickets":     member.ClaimableVoteTickets,
 		"subscriptionActive":       member.SubscriptionActive,
 		"subscriptionExpiresAt":    member.SubscriptionExpiresAt,
 	})
@@ -446,10 +588,10 @@ func (s *Server) handleAdminImportMerchantCSV(w http.ResponseWriter, r *http.Req
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"message":        "menu import completed",
-		"merchantCount":  merchantCount,
-		"menuItemCount":  itemCount,
-		"importedBy":     memberID,
+		"message":       "menu import completed",
+		"merchantCount": merchantCount,
+		"menuItemCount": itemCount,
+		"importedBy":    memberID,
 	})
 }
 
@@ -511,6 +653,35 @@ func (s *Server) handleGetProposal(w http.ResponseWriter, r *http.Request, membe
 	writeJSON(w, http.StatusOK, anonymizeProposal(proposal, memberID))
 }
 
+func (s *Server) handleDeleteProposal(w http.ResponseWriter, r *http.Request, memberID int64) {
+	proposalID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid proposal id")
+		return
+	}
+	proposal, err := s.requireProposalAccess(memberID, proposalID)
+	if err != nil {
+		if isProposalAccessError(err) {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if proposal.CreatedBy != memberID {
+		writeError(w, http.StatusForbidden, "only the creator can delete this proposal")
+		return
+	}
+	if err := s.proposals.Delete(proposalID, memberID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"success":    true,
+		"proposalId": proposalID,
+	})
+}
+
 func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request, memberID int64) {
 	var body struct {
 		Title           string `json:"title"`
@@ -521,6 +692,7 @@ func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request, me
 		VoteMinutes     int64  `json:"voteMinutes"`
 		OrderMinutes    int64  `json:"orderMinutes"`
 		GroupID         int64  `json:"groupId"`
+		UseCreateOrderTicket bool `json:"useCreateOrderTicket"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -540,39 +712,21 @@ func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request, me
 		return
 	}
 	now := time.Now().In(handlerBusinessLocation())
-	mealPeriod := currentLocalMealPeriod(now)
 	proposalDate := now.Format("2006-01-02")
-	for _, existing := range s.proposals.List() {
-		if existing.GroupID != body.GroupID {
-			continue
-		}
-		if normalizedMealPeriod(existing.MealPeriod) != mealPeriod {
-			continue
-		}
-		if normalizedProposalDate(existing.ProposalDate, now) != proposalDate {
-			continue
-		}
-		writeError(w, http.StatusBadRequest, "this group already has a proposer for the current round")
-		return
-	}
 	consumeProposalToken := strings.TrimSpace(body.MerchantID) == ""
-	proposal, err := s.proposals.Create(memberID, body.Title, body.Description, "all", mealPeriod, proposalDate, body.MaxOptions, body.ProposalMinutes, body.VoteMinutes, body.OrderMinutes, consumeProposalToken)
+	proposal, err := s.proposals.Create(memberID, body.Title, body.Description, "all", "custom", proposalDate, body.MaxOptions, body.ProposalMinutes, body.VoteMinutes, body.OrderMinutes, consumeProposalToken, body.UseCreateOrderTicket)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if body.GroupID > 0 {
 		if err := s.adminRepo.SetProposalGroupID(proposal.ID, body.GroupID); err != nil {
-			if errors.Is(err, repository.ErrDuplicateProposalRound) {
-				writeError(w, http.StatusBadRequest, "this group already has a proposer for the current round")
-				return
-			}
 			writeError(w, http.StatusInternalServerError, "failed to link proposal to group")
 			return
 		}
 	}
 	if strings.TrimSpace(body.MerchantID) != "" {
-		if _, err := s.proposals.AddOption(proposal.ID, memberID, body.MerchantID); err != nil {
+		if _, err := s.proposals.AddOption(proposal.ID, memberID, body.MerchantID, false); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -583,25 +737,6 @@ func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request, me
 		}
 	}
 	writeJSON(w, http.StatusCreated, anonymizeProposal(proposal, memberID))
-}
-
-func normalizedMealPeriod(mealPeriod string) string {
-	value := strings.TrimSpace(strings.ToLower(mealPeriod))
-	if value == "dinner" {
-		return "dinner"
-	}
-	return "lunch"
-}
-
-func currentLocalMealPeriod(now time.Time) string {
-	localNow := now.In(handlerBusinessLocation())
-	if localNow.Hour() < 12 {
-		return "lunch"
-	}
-	if localNow.Hour() == 12 && localNow.Minute() == 0 && localNow.Second() == 0 {
-		return "dinner"
-	}
-	return "dinner"
 }
 
 func normalizedProposalDate(proposalDate string, reference time.Time) string {
@@ -620,6 +755,7 @@ func (s *Server) handleAddOption(w http.ResponseWriter, r *http.Request, memberI
 	}
 	var body struct {
 		MerchantID string `json:"merchantId"`
+		UseProposalTicket bool `json:"useProposalTicket"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -633,7 +769,7 @@ func (s *Server) handleAddOption(w http.ResponseWriter, r *http.Request, memberI
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	option, err := s.proposals.AddOption(proposalID, memberID, body.MerchantID)
+	option, err := s.proposals.AddOption(proposalID, memberID, body.MerchantID, body.UseProposalTicket)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -667,12 +803,13 @@ func (s *Server) handleVote(w http.ResponseWriter, r *http.Request, memberID int
 	var body struct {
 		OptionID    int64 `json:"optionId"`
 		TokenAmount int64 `json:"tokenAmount"`
+		UseVoteTicket bool `json:"useVoteTicket"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if body.TokenAmount == 0 {
+	if body.TokenAmount == 0 && !body.UseVoteTicket {
 		body.TokenAmount = 1
 	}
 	if _, err := s.requireProposalAccess(memberID, proposalID); err != nil {
@@ -683,7 +820,7 @@ func (s *Server) handleVote(w http.ResponseWriter, r *http.Request, memberID int
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	proposal, err := s.proposals.Vote(proposalID, memberID, body.OptionID, body.TokenAmount)
+	proposal, err := s.proposals.Vote(proposalID, memberID, body.OptionID, body.TokenAmount, body.UseVoteTicket)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -774,7 +911,7 @@ func (s *Server) handleOrderSign(w http.ResponseWriter, r *http.Request, memberI
 		writeError(w, http.StatusBadRequest, "wallet address is not linked")
 		return
 	}
-	quote, sig, order, err := s.orders.Sign(body.ProposalID, member.ID, body.Items, member.WalletAddress)
+	quote, sig, err := s.orders.Sign(body.ProposalID, member.ID, body.Items, member.WalletAddress)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -782,8 +919,47 @@ func (s *Server) handleOrderSign(w http.ResponseWriter, r *http.Request, memberI
 	writeJSON(w, http.StatusOK, map[string]any{
 		"quote":     quote,
 		"signature": sig,
-		"order":     order,
 	})
+}
+
+func (s *Server) handleFinalizeOrder(w http.ResponseWriter, r *http.Request, memberID int64) {
+	var body struct {
+		ProposalID int64                  `json:"proposalId"`
+		Items      map[string]int64       `json:"items"`
+		Signature  *models.OrderSignature `json:"signature"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if _, err := s.requireProposalAccess(memberID, body.ProposalID); err != nil {
+		if isProposalAccessError(err) {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		writeError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	order, err := s.orders.SaveSignedOrder(body.ProposalID, memberID, body.Items, body.Signature)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, order)
+}
+
+func (s *Server) handleMemberConfirmOrderComplete(w http.ResponseWriter, r *http.Request, memberID int64) {
+	orderID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid order id")
+		return
+	}
+	order, err := s.orderRepo.UpdateMemberOrderStatus(orderID, memberID, "ready_for_payout")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, order)
 }
 
 func (s *Server) handleSettleProposal(w http.ResponseWriter, r *http.Request, memberID int64) {
@@ -1133,6 +1309,72 @@ func (s *Server) handleGetGroup(w http.ResponseWriter, r *http.Request, memberID
 	writeJSON(w, http.StatusOK, group)
 }
 
+func (s *Server) handleGetGroupDetail(w http.ResponseWriter, r *http.Request, memberID int64) {
+	groupID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid group id")
+		return
+	}
+	detail, err := s.groupRepo.GetGroupDetail(groupID, memberID)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "not a member") {
+			writeError(w, http.StatusForbidden, err.Error())
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, detail)
+}
+
+func (s *Server) handleGroupInviteUsage(w http.ResponseWriter, r *http.Request, memberID int64) {
+	groupID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid group id")
+		return
+	}
+	isMember, err := s.groupRepo.IsMember(groupID, memberID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if !isMember {
+		writeError(w, http.StatusForbidden, "not a member of this group")
+		return
+	}
+	items, err := s.groupRepo.ListGroupInviteUsages(groupID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if items == nil {
+		items = []*models.GroupInviteUsage{}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+func (s *Server) handleUpdateGroup(w http.ResponseWriter, r *http.Request, memberID int64) {
+	groupID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid group id")
+		return
+	}
+	var body struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	group, err := s.groupRepo.UpdateGroup(groupID, memberID, body.Name, body.Description)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, group)
+}
+
 func (s *Server) handleCreateGroupInvite(w http.ResponseWriter, r *http.Request, memberID int64) {
 	groupID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if err != nil {
@@ -1161,6 +1403,24 @@ func (s *Server) handleCreateGroupInvite(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusCreated, invite)
 }
 
+func (s *Server) handleRemoveGroupMember(w http.ResponseWriter, r *http.Request, memberID int64) {
+	groupID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid group id")
+		return
+	}
+	targetMemberID, err := strconv.ParseInt(r.PathValue("memberId"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid target member id")
+		return
+	}
+	if err := s.groupRepo.RemoveGroupMember(groupID, memberID, targetMemberID); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
 // generateGroupInviteCode returns 8 cryptographically random hex characters.
 func generateGroupInviteCode() (string, error) {
 	buf := make([]byte, 4) // 4 bytes = 8 hex characters
@@ -1181,7 +1441,7 @@ func (s *Server) handleJoinGroup(w http.ResponseWriter, r *http.Request, memberI
 		writeError(w, http.StatusNotFound, "invite not found")
 		return
 	}
-	if err := s.groupRepo.AddMember(invite.GroupID, memberID); err != nil {
+	if err := s.groupRepo.AddMemberByInvite(invite.GroupID, memberID, invite.InviteCode); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
