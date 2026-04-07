@@ -357,7 +357,7 @@ func TestLocalProposalAwaitingSettlementIncludesRoundOrderTotals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}
-	option, err := s.InsertProposalOption(proposal.ID, aliceID, "shop-hotpot", "湯潮火鍋", "Alice", 0)
+	option, err := s.InsertProposalOption(proposal.ID, aliceID, "shop-hotpot", "湯潮火鍋", "Alice", 0, false)
 	if err != nil {
 		t.Fatalf("insert option: %v", err)
 	}
@@ -430,11 +430,11 @@ func TestLocalProposalAutoSettlesAfterOrderingDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}
-	option, err := s.InsertProposalOption(proposal.ID, aliceID, "shop-hotpot", "湯潮火鍋", "Alice", 0)
+	option, err := s.InsertProposalOption(proposal.ID, aliceID, "shop-hotpot", "湯潮火鍋", "Alice", 0, false)
 	if err != nil {
 		t.Fatalf("insert option: %v", err)
 	}
-	if err := s.RecordVote(proposal.ID, bobID, option.ID, 3, "Bob"); err != nil {
+	if err := s.RecordVote(proposal.ID, bobID, option.ID, 3, "Bob", false); err != nil {
 		t.Fatalf("record vote: %v", err)
 	}
 	if err := s.db.WithContext(context.Background()).Exec(`UPDATE proposals SET winner_option_id = ? WHERE id = ?`, option.ID, proposal.ID).Error; err != nil {

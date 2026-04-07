@@ -10,7 +10,9 @@ import { clearStoredToken, fetchMe, fetchMerchantDashboard, getStoredToken, setS
 import { authenticateWithWallet, clearWalletConnection, getConnectedWalletAddress } from "@/lib/wallet-auth";
 
 const memberLinks = [
-  { href: "/member/ordering", label: "建立訂單" },
+  { href: "/member", label: "會員中心" },
+  { href: "/member/groups", label: "群組" },
+  { href: "/member/ordering", label: "建立清單" },
   { href: "/member/ongoing-orders", label: "成立中訂單" },
   { href: "/member/ordering/submitted", label: "完成送出訂單" },
   { href: "/member/merchants", label: "店家清單" }
@@ -213,7 +215,7 @@ function AppNavInner({
         <div className="hidden items-center gap-3 md:flex">
           <nav className="flex flex-wrap items-center gap-2">
             {visibleLinks.map((link) => {
-              const active = pathname === link.href;
+              const active = isNavLinkActive(pathname, link.href);
               return (
                 <Link
                   key={link.href}
@@ -362,7 +364,7 @@ function AppNavInner({
           ) : null}
           <nav className="flex flex-col gap-1">
             {visibleLinks.map((link) => {
-              const active = pathname === link.href;
+              const active = isNavLinkActive(pathname, link.href);
               return (
                 <Link
                   key={link.href}
@@ -506,4 +508,8 @@ function shortAddress(address: string) {
   if (!address) return "";
   if (address.length <= 10) return address;
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+function isNavLinkActive(pathname: string, href: string) {
+  return pathname === href || pathname.startsWith(`${href}/`);
 }

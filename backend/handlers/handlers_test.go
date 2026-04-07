@@ -1312,7 +1312,7 @@ func TestOrderSignAllowsLocalProposalOrderingWithoutChainMapping(t *testing.T) {
 	if err := appStore.SetProposalGroupID(proposal.ID, group.ID); err != nil {
 		t.Fatalf("link local proposal to group: %v", err)
 	}
-	option, err := appStore.InsertProposalOption(proposal.ID, alice.ID, "shop-hotpot", "湯潮火鍋", "Alice", 0)
+	option, err := appStore.InsertProposalOption(proposal.ID, alice.ID, "shop-hotpot", "湯潮火鍋", "Alice", 0, false)
 	if err != nil {
 		t.Fatalf("insert winning option: %v", err)
 	}
@@ -1337,7 +1337,6 @@ func TestOrderSignAllowsLocalProposalOrderingWithoutChainMapping(t *testing.T) {
 	var body struct {
 		Quote     models.OrderQuote     `json:"quote"`
 		Signature models.OrderSignature `json:"signature"`
-		Order     models.Order          `json:"order"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode local order sign response: %v", err)
@@ -1347,11 +1346,26 @@ func TestOrderSignAllowsLocalProposalOrderingWithoutChainMapping(t *testing.T) {
 	if body.Signature.OrderHash != expectedHash {
 		t.Fatalf("expected local order hash %s, got %s", expectedHash, body.Signature.OrderHash)
 	}
-	if body.Order.Status != "paid_local" {
-		t.Fatalf("expected local order status paid_local, got %s", body.Order.Status)
+	finalize := performAuthorizedJSONRequest(t, handler, http.MethodPost, "/orders/finalize", token, map[string]any{
+		"proposalId": proposal.ID,
+		"items": map[string]int64{
+			"hotpot-set": 1,
+		},
+		"signature": body.Signature,
+	})
+	if finalize.Code != http.StatusCreated {
+		t.Fatalf("expected local order finalize to succeed, got %d: %s", finalize.Code, finalize.Body.String())
 	}
-	if body.Order.MemberName != "Alice" {
-		t.Fatalf("expected local order member name Alice, got %q", body.Order.MemberName)
+
+	var order models.Order
+	if err := json.Unmarshal(finalize.Body.Bytes(), &order); err != nil {
+		t.Fatalf("decode local finalize order response: %v", err)
+	}
+	if order.Status != "paid_local" {
+		t.Fatalf("expected local order status paid_local, got %s", order.Status)
+	}
+	if order.MemberName != "Alice" {
+		t.Fatalf("expected local order member name Alice, got %q", order.MemberName)
 	}
 }
 

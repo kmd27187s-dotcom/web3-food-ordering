@@ -33,7 +33,7 @@ func (m *mockProposalRepo) CreateProposal(memberID int64, title, description, me
 	return p, nil
 }
 
-func (m *mockProposalRepo) CreateProposalWithCredit(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time) (*models.Proposal, error) {
+func (m *mockProposalRepo) CreateProposalWithCredit(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time, useTicket bool) (*models.Proposal, error) {
 	return m.CreateProposal(memberID, title, description, merchantGroup, mealPeriod, proposalDate, maxOptions, createdByName, proposalDeadline, voteDeadline, orderDeadline)
 }
 
@@ -50,14 +50,18 @@ func (m *mockProposalRepo) GetProposal(id int64) (*models.Proposal, error) {
 	}
 	return nil, errors.New("proposal not found")
 }
-func (m *mockProposalRepo) InsertProposalOption(proposalID, memberID int64, merchantID, merchantName, proposerName string, tokenCost int64) (*models.ProposalOption, error) {
+func (m *mockProposalRepo) DeleteProposalByCreator(proposalID, memberID int64) error {
+	delete(m.proposals, proposalID)
+	return nil
+}
+func (m *mockProposalRepo) InsertProposalOption(proposalID, memberID int64, merchantID, merchantName, proposerName string, tokenCost int64, useTicket bool) (*models.ProposalOption, error) {
 	opt := &models.ProposalOption{ID: 1, MerchantID: merchantID, MerchantName: merchantName, ProposerMember: memberID, TokenStake: tokenCost}
 	if p, ok := m.proposals[proposalID]; ok {
 		p.Options = append(p.Options, opt)
 	}
 	return opt, nil
 }
-func (m *mockProposalRepo) RecordVote(proposalID, memberID, optionID, tokenAmount int64, displayName string) error {
+func (m *mockProposalRepo) RecordVote(proposalID, memberID, optionID, tokenAmount int64, displayName string, useTicket bool) error {
 	return nil
 }
 func (m *mockProposalRepo) ApplySettlementRewards(proposalID int64, rewards []repository.MemberReward, optionRefunds []repository.OptionRefund) error {
@@ -87,6 +91,64 @@ func (m *mockMerchantRepo) UpsertMerchant(merchant *models.Merchant) (*models.Me
 func (m *mockMerchantRepo) UpsertMenuItem(_ string, _ *models.MenuItem) error {
 	return nil
 }
+func (m *mockMerchantRepo) GetMerchantDetail(id string) (*models.MerchantDetail, error) {
+	merchant, err := m.GetMerchant(id)
+	if err != nil {
+		return nil, err
+	}
+	return &models.MerchantDetail{Merchant: merchant, Reviews: []*models.MerchantReview{}}, nil
+}
+func (m *mockMerchantRepo) GetMerchantByOwner(memberID int64, wallet string) (*models.Merchant, error) {
+	return nil, errors.New("merchant not found")
+}
+func (m *mockMerchantRepo) ListMerchantReviews(merchantID string) ([]*models.MerchantReview, error) {
+	return []*models.MerchantReview{}, nil
+}
+func (m *mockMerchantRepo) CreateMerchantReview(review *models.MerchantReview) (*models.MerchantReview, error) {
+	return review, nil
+}
+func (m *mockMerchantRepo) ClaimMerchant(merchantID string, memberID int64, displayName, wallet string) (*models.Merchant, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockMerchantRepo) UpsertOwnedMerchantProfile(memberID int64, displayName, wallet string, merchant *models.Merchant) (*models.Merchant, error) {
+	return merchant, nil
+}
+func (m *mockMerchantRepo) UpdateOwnedMerchantWallet(memberID int64, wallet string) (*models.Merchant, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockMerchantRepo) UnlinkOwnedMerchant(memberID int64) error {
+	return nil
+}
+func (m *mockMerchantRepo) RequestMerchantDelist(memberID int64) (*models.Merchant, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockMerchantRepo) ListMerchantDelistRequests(pendingOnly bool) ([]*models.MerchantDelistRequest, error) {
+	return []*models.MerchantDelistRequest{}, nil
+}
+func (m *mockMerchantRepo) ReviewMerchantDelist(merchantID string, approve bool) (*models.Merchant, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockMerchantRepo) ListMerchantOrders(merchantID string) ([]*models.Order, error) {
+	return []*models.Order{}, nil
+}
+func (m *mockMerchantRepo) CreateMenuChangeRequest(req *models.MenuChangeRequest) (*models.MenuChangeRequest, error) {
+	return req, nil
+}
+func (m *mockMerchantRepo) ListMenuChangeRequests(merchantID string, status string) ([]*models.MenuChangeRequest, error) {
+	return []*models.MenuChangeRequest{}, nil
+}
+func (m *mockMerchantRepo) WithdrawMenuChangeRequest(requestID, requesterMemberID int64) (*models.MenuChangeRequest, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockMerchantRepo) ReviewMenuChangeRequest(requestID, reviewerMemberID int64, reviewerName string, approved bool, reviewNote string, effectiveAt time.Time) (*models.MenuChangeRequest, error) {
+	return nil, errors.New("not implemented")
+}
+func (m *mockMerchantRepo) ApplyScheduledMenuChangeRequests(now time.Time) error {
+	return nil
+}
+func (m *mockMerchantRepo) CancelMerchantDelist(memberID int64) (*models.Merchant, error) {
+	return nil, errors.New("not implemented")
+}
 
 func TestAddOption_InsufficientTokens(t *testing.T) {
 	memberRepo := newMockMemberRepo()
@@ -105,7 +167,7 @@ func TestAddOption_InsufficientTokens(t *testing.T) {
 	proposal, _ := proposalRepo.CreateProposal(member.ID, "Lunch", "", "all", "lunch", time.Now().In(time.Local).Format("2006-01-02"), 5, "Alice",
 		time.Now().Add(time.Hour), time.Now().Add(2*time.Hour), time.Now().Add(3*time.Hour))
 
-	_, err = svc.AddOption(proposal.ID, member.ID, "shop-bento")
+	_, err = svc.AddOption(proposal.ID, member.ID, "shop-bento", false)
 	if err == nil {
 		t.Error("expected error for insufficient tokens")
 	}
@@ -126,7 +188,7 @@ func TestVote_WrongStatus(t *testing.T) {
 		time.Now().Add(time.Hour), time.Now().Add(2*time.Hour), time.Now().Add(3*time.Hour))
 	// proposal.Status is "proposing", not "voting"
 
-	_, err = svc.Vote(proposal.ID, member.ID, 1, 10)
+	_, err = svc.Vote(proposal.ID, member.ID, 1, 10, false)
 	if err == nil {
 		t.Error("expected error for wrong proposal status")
 	}
