@@ -1562,9 +1562,8 @@ func (s *Server) handleLeaveGroup(w http.ResponseWriter, r *http.Request, member
 
 func (s *Server) handleSubscriptionSync(w http.ResponseWriter, r *http.Request, memberID int64) {
 	var body struct {
-		TxHash     string `json:"txHash"`
-		AmountWei  string `json:"amountWei"`
-		ExpiresAt  string `json:"expiresAt"`
+		TxHash    string `json:"txHash"`
+		ExpiresAt string `json:"expiresAt"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1579,7 +1578,12 @@ func (s *Server) handleSubscriptionSync(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := s.usageRepo.LogUsage(memberID, 0, "subscribe", "native", "debit", body.AmountWei, "鏈上月訂閱", body.TxHash); err != nil {
+	params, err := s.chainRepo.GovernanceParams()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.usageRepo.LogUsage(memberID, 0, "subscribe", "native", "debit", strconv.FormatInt(params.SubscriptionFeeWei, 10), "鏈上月訂閱", body.TxHash); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

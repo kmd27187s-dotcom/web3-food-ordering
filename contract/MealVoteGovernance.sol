@@ -46,7 +46,6 @@ contract MealVoteGovernance {
         uint128 createFeeSnapshot;
         uint128 proposalFeeSnapshot;
         uint128 voteFeeSnapshot;
-        uint32 totalVotes;
         uint32 winnerCandidateId;
         bool settled;
     }
@@ -55,16 +54,15 @@ contract MealVoteGovernance {
         bytes32 merchantKey;
         address proposer;
         uint40 firstProposedAt;
-        uint128 proposalFeePaidWei;
-        uint128 voteFeeCollectedWei;
         uint32 voteCount;
+        uint32 couponVoteCount;
+        bool usedProposalCoupon;
     }
 
     struct VoteRecord {
         uint32 candidateId;
         uint32 voteCount;
-        uint128 feeAmountWei;
-        bool exists;
+        bool usedCoupon;
     }
 
     struct CouponState {
@@ -103,7 +101,7 @@ contract MealVoteGovernance {
     event RoundClaimed(uint256 indexed roundId, address indexed claimant, uint256 amountWei);
     event PlatformShareClaimed(address indexed platformWallet, uint256 indexed roundId, uint256 amountWei);
     event PointsGranted(address indexed member, uint256 indexed roundId, uint256 amount, bytes32 reason);
-    event SubscriptionPaid(address indexed member, uint256 amountWei, uint256 expiresAt);
+    event SubscriptionPaid(address indexed member, uint256 expiresAt);
     event SubscriptionCancelled(address indexed member, uint256 cancelledAt);
     event ContractPaused(address indexed operator, uint256 indexed roundId);
     event ContractUnpaused(address indexed operator, uint256 indexed roundId);
@@ -143,7 +141,7 @@ contract MealVoteGovernance {
         uint40 base = currentExpiry > block.timestamp ? currentExpiry : uint40(block.timestamp);
         uint40 nextExpiry = base + uint40(params.subscriptionDurationDays * 1 days);
         subscriptionExpiresAt[msg.sender] = nextExpiry;
-        emit SubscriptionPaid(msg.sender, msg.value, nextExpiry);
+        emit SubscriptionPaid(msg.sender, nextExpiry);
         return nextExpiry;
     }
 
@@ -206,12 +204,8 @@ contract MealVoteGovernance {
         require(round.status == RoundStatus.ProposalOpen || round.status == RoundStatus.VotingOpen, "round closed");
         require(block.timestamp > round.proposalDeadline, "proposal active");
         require(block.timestamp <= round.voteDeadline, "vote closed");
-        require(!votes[roundId][msg.sender].exists, "vote locked");
+        require(votes[roundId][msg.sender].voteCount == 0, "vote locked");
         require(candidateId > 0 && candidateId <= candidateCountByRound[roundId], "candidate missing");
-
-        if (round.status != RoundStatus.VotingOpen) {
-            round.status = RoundStatus.VotingOpen;
-        }
 
         uint256 requiredValue = params.voteFeeWei * voteCount;
         if (useCoupon) {
@@ -223,14 +217,14 @@ contract MealVoteGovernance {
         votes[roundId][msg.sender] = VoteRecord({
             candidateId: uint32(candidateId),
             voteCount: uint32(voteCount),
-            feeAmountWei: uint128(requiredValue),
-            exists: true
+            usedCoupon: useCoupon
         });
 
         Candidate storage candidate = candidates[roundId][candidateId];
-        candidate.voteFeeCollectedWei += uint128(requiredValue);
         candidate.voteCount += uint32(voteCount);
-        round.totalVotes += uint32(voteCount);
+        if (useCoupon) {
+            candidate.couponVoteCount += 1;
+        }
 
         emit VoteCast(roundId, candidateId, msg.sender, voteCount, requiredValue, useCoupon);
     }
@@ -253,7 +247,8 @@ contract MealVoteGovernance {
         require(!round.settled, "already settled");
 
         round.settled = true;
-        if (round.totalVotes == 0) {
+        uint256 totalVotes = _countTotalVotes(roundId);
+        if (totalVotes == 0) {
             round.status = RoundStatus.VotingClosedFailed;
             emit RoundSettled(roundId, 0, 0, true);
             return;
@@ -262,7 +257,7 @@ contract MealVoteGovernance {
         uint256 winnerCandidateId = _findWinner(roundId);
         round.winnerCandidateId = uint32(winnerCandidateId);
         round.status = RoundStatus.VotingClosedSuccess;
-        emit RoundSettled(roundId, winnerCandidateId, round.totalVotes, false);
+        emit RoundSettled(roundId, winnerCandidateId, totalVotes, false);
     }
 
     function claimRound(uint256 roundId) external {
@@ -283,7 +278,7 @@ contract MealVoteGovernance {
             }
 
             VoteRecord memory vote = votes[roundId][msg.sender];
-            if (vote.exists) {
+            if (vote.voteCount > 0) {
                 amountWei += _voteRefund(vote);
                 if (vote.candidateId == round.winnerCandidateId) {
                     uint256 votePoints = params.winnerVotePointsPerVote * vote.voteCount;
@@ -298,8 +293,8 @@ contract MealVoteGovernance {
                 if (candidate.proposer != msg.sender) {
                     continue;
                 }
-                amountWei += _proposalRefund(candidate, candidateId == round.winnerCandidateId);
-                amountWei += _proposalReward(candidate, candidateId == round.winnerCandidateId);
+                amountWei += _proposalRefund(round, candidate, candidateId == round.winnerCandidateId);
+                amountWei += _proposalReward(round, candidate, candidateId == round.winnerCandidateId);
                 if (candidateId == round.winnerCandidateId) {
                     totalPointsToGrant += params.winnerProposalPoints;
                     emit PointsGranted(msg.sender, roundId, params.winnerProposalPoints, keccak256("winner_proposal"));
@@ -374,9 +369,9 @@ contract MealVoteGovernance {
             merchantKey: merchantKey,
             proposer: proposer,
             firstProposedAt: uint40(block.timestamp),
-            proposalFeePaidWei: uint128(requiredValue),
-            voteFeeCollectedWei: 0,
-            voteCount: 0
+            voteCount: 0,
+            couponVoteCount: 0,
+            usedProposalCoupon: useCoupon
         });
         merchantAlreadyProposed[roundId][merchantKey] = true;
         memberProposalCount[roundId][proposer] += 1;
@@ -398,6 +393,13 @@ contract MealVoteGovernance {
                 earliestProposalTime = candidate.firstProposedAt;
                 winnerCandidateId = candidateId;
             }
+        }
+    }
+
+    function _countTotalVotes(uint256 roundId) internal view returns (uint256 totalVotes) {
+        uint32 candidateCount = candidateCountByRound[roundId];
+        for (uint32 candidateId = 1; candidateId <= candidateCount; candidateId++) {
+            totalVotes += candidates[roundId][candidateId].voteCount;
         }
     }
 
@@ -425,30 +427,47 @@ contract MealVoteGovernance {
         }
     }
 
-    function _proposalRefund(Candidate memory candidate, bool isWinner) internal view returns (uint256) {
-        if (candidate.proposalFeePaidWei == 0) {
+    function _proposalRefund(Round storage round, Candidate memory candidate, bool isWinner) internal view returns (uint256) {
+        if (candidate.usedProposalCoupon) {
             return 0;
         }
         uint256 refundBps = isWinner ? params.winnerProposalRefundBps : params.loserProposalRefundBps;
-        return (candidate.proposalFeePaidWei * refundBps) / 10000;
+        return (uint256(round.proposalFeeSnapshot) * refundBps) / 10000;
     }
 
-    function _proposalReward(Candidate memory candidate, bool isWinner) internal view returns (uint256) {
-        uint256 postVoteRefundRemainder = _postVoteRefundRemainder(candidate.voteFeeCollectedWei);
+    function _proposalReward(Round storage round, Candidate memory candidate, bool isWinner) internal view returns (uint256) {
+        uint256 postVoteRefundRemainder = _postVoteRefundRemainder(round, candidate);
         uint256 rewardBps = isWinner ? params.winnerBonusBps : params.loserBonusBps;
         return (postVoteRefundRemainder * rewardBps) / 10000;
     }
 
     function _voteRefund(VoteRecord memory vote) internal view returns (uint256) {
-        if (!vote.exists || vote.feeAmountWei == 0) {
+        if (vote.voteCount == 0) {
             return 0;
         }
-        return (uint256(vote.feeAmountWei) * params.voteRefundBps) / 10000;
+        uint256 feePaidWei = params.voteFeeWei * vote.voteCount;
+        if (vote.usedCoupon && feePaidWei >= params.voteFeeWei) {
+            feePaidWei -= params.voteFeeWei;
+        }
+        if (feePaidWei == 0) {
+            return 0;
+        }
+        return (feePaidWei * params.voteRefundBps) / 10000;
     }
 
-    function _postVoteRefundRemainder(uint256 voteFeeCollectedWei) internal view returns (uint256) {
+    function _postVoteRefundRemainder(Round storage round, Candidate memory candidate) internal view returns (uint256) {
+        uint256 voteFeeCollectedWei = _voteFeeCollected(round, candidate);
         uint256 voteRefundWei = (voteFeeCollectedWei * params.voteRefundBps) / 10000;
         return voteFeeCollectedWei - voteRefundWei;
+    }
+
+    function _voteFeeCollected(Round storage round, Candidate memory candidate) internal view returns (uint256) {
+        uint256 totalVoteFees = uint256(round.voteFeeSnapshot) * candidate.voteCount;
+        uint256 couponDiscount = uint256(round.voteFeeSnapshot) * candidate.couponVoteCount;
+        if (couponDiscount > totalVoteFees) {
+            return 0;
+        }
+        return totalVoteFees - couponDiscount;
     }
 
     function _creatorCancelledRefund(Round storage round) internal view returns (uint256) {
@@ -465,8 +484,10 @@ contract MealVoteGovernance {
             uint32 failedCandidateCount = candidateCountByRound[roundId];
             for (uint32 candidateId = 1; candidateId <= failedCandidateCount; candidateId++) {
                 Candidate storage candidate = candidates[roundId][candidateId];
-                amountWei += candidate.proposalFeePaidWei;
-                amountWei += candidate.voteFeeCollectedWei;
+                if (!candidate.usedProposalCoupon) {
+                    amountWei += round.proposalFeeSnapshot;
+                }
+                amountWei += _voteFeeCollected(round, candidate);
             }
             return amountWei;
         }
@@ -478,10 +499,12 @@ contract MealVoteGovernance {
         uint32 candidateCount = candidateCountByRound[roundId];
         for (uint32 candidateId = 1; candidateId <= candidateCount; candidateId++) {
             Candidate storage candidate = candidates[roundId][candidateId];
-            uint256 proposalRefundWei = _proposalRefund(candidate, candidateId == round.winnerCandidateId);
-            uint256 proposalRewardWei = _proposalReward(candidate, candidateId == round.winnerCandidateId);
-            uint256 postVoteRefundRemainder = _postVoteRefundRemainder(candidate.voteFeeCollectedWei);
-            amount += candidate.proposalFeePaidWei - proposalRefundWei;
+            uint256 proposalRefundWei = _proposalRefund(round, candidate, candidateId == round.winnerCandidateId);
+            uint256 proposalRewardWei = _proposalReward(round, candidate, candidateId == round.winnerCandidateId);
+            uint256 postVoteRefundRemainder = _postVoteRefundRemainder(round, candidate);
+            if (!candidate.usedProposalCoupon) {
+                amount += round.proposalFeeSnapshot - proposalRefundWei;
+            }
             amount += postVoteRefundRemainder - proposalRewardWei;
         }
         return amount;
@@ -491,7 +514,9 @@ contract MealVoteGovernance {
         uint256 amountWei = uint256(round.createFeeSnapshot) - _creatorCancelledRefund(round);
         uint32 candidateCount = candidateCountByRound[roundId];
         for (uint32 candidateId = 1; candidateId <= candidateCount; candidateId++) {
-            amountWei += candidates[roundId][candidateId].proposalFeePaidWei;
+            if (!candidates[roundId][candidateId].usedProposalCoupon) {
+                amountWei += round.proposalFeeSnapshot;
+            }
         }
         return amountWei;
     }

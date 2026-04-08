@@ -57,7 +57,7 @@ contract MealVoteGovernanceTest is Test {
         );
 
         assertEq(roundId, 1);
-        (, , address creator, , , , , , , , , , , ) = governance.rounds(roundId);
+        (, , address creator, , , , , , , , , , ) = governance.rounds(roundId);
         assertEq(creator, alice);
     }
 
@@ -79,5 +79,34 @@ contract MealVoteGovernanceTest is Test {
 
         assertGt(expiresAt, block.timestamp);
         assertEq(governance.subscriptionExpiresAt(alice), expiresAt);
+    }
+
+    function testCastVoteWithCoupon() public {
+        bytes32[] memory merchants = new bytes32[](1);
+        merchants[0] = keccak256("merchant:demo");
+        bool[] memory useProposalCoupons = new bool[](1);
+        useProposalCoupons[0] = false;
+
+        vm.prank(alice);
+        uint256 roundId = governance.createRound{value: 1.5 ether}(
+            keccak256("group:demo"),
+            keccak256("title:lunch"),
+            merchants,
+            false,
+            useProposalCoupons
+        );
+
+        vm.prank(bob);
+        governance.claimDailyCoupons(20260408);
+
+        vm.warp(block.timestamp + 11 minutes);
+
+        vm.prank(bob);
+        governance.castVote{value: 0.4 ether}(roundId, 1, 3, true);
+
+        (uint32 candidateId, uint32 voteCount, bool usedCoupon) = governance.votes(roundId, bob);
+        assertEq(candidateId, 1);
+        assertEq(voteCount, 3);
+        assertTrue(usedCoupon);
     }
 }

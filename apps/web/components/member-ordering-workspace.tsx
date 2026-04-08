@@ -71,15 +71,14 @@ type WorkspaceState = {
   governanceParams: GovernanceParams | null;
 };
 
-const stageDurationOptions = [1, 10, 20, 30, 40, 50, 60, 70, 80, 90] as const;
 const APPROX_TWD_PER_ETH = 120000;
 const defaultCreateDraft: CreateDraft = {
   groupId: "",
   title: "",
   maxOptions: "5",
-  proposalMinutes: "1",
-  voteMinutes: "1",
-  orderMinutes: "1",
+  proposalMinutes: "",
+  voteMinutes: "",
+  orderMinutes: "",
   merchantIds: []
 };
 
@@ -126,7 +125,10 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     });
     setCreateDraft((current) => ({
       ...current,
-      groupId: current.groupId || (groups[0] ? String(groups[0].id) : "")
+      groupId: current.groupId || (groups[0] ? String(groups[0].id) : ""),
+      proposalMinutes: current.proposalMinutes || String(governanceParams?.proposalDurationMinutes || 1),
+      voteMinutes: current.voteMinutes || String(governanceParams?.voteDurationMinutes || 1),
+      orderMinutes: current.orderMinutes || String(governanceParams?.orderingDurationMinutes || 1)
     }));
   }, []);
 
@@ -205,6 +207,9 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
   }, [stage, stageProposals, stageSort]);
 
   const detail = useMemo(() => sortedStageProposals.find((proposal) => proposal.id === proposalId) || null, [proposalId, sortedStageProposals]);
+  const proposalDurationOptions = useMemo(() => durationOptions(state.governanceParams?.proposalDurationOptions, state.governanceParams?.proposalDurationMinutes ?? 1), [state.governanceParams?.proposalDurationMinutes, state.governanceParams?.proposalDurationOptions]);
+  const voteDurationOptions = useMemo(() => durationOptions(state.governanceParams?.voteDurationOptions, state.governanceParams?.voteDurationMinutes ?? 1), [state.governanceParams?.voteDurationMinutes, state.governanceParams?.voteDurationOptions]);
+  const orderingDurationOptions = useMemo(() => durationOptions(state.governanceParams?.orderingDurationOptions, state.governanceParams?.orderingDurationMinutes ?? 1), [state.governanceParams?.orderingDurationMinutes, state.governanceParams?.orderingDurationOptions]);
 
   async function handleCreateOrder() {
     if (!createDraft.title.trim() || !createDraft.groupId) return;
@@ -613,17 +618,17 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
             </Field>
             <Field label="提案時間（分鐘） (必填)">
               <select className="meal-field" value={createDraft.proposalMinutes} onChange={(event) => setCreateDraft((current) => ({ ...current, proposalMinutes: event.target.value }))}>
-                {stageDurationOptions.map((minutes) => <option key={`proposal-${minutes}`} value={String(minutes)}>{minutes} 分鐘</option>)}
+                {proposalDurationOptions.map((minutes) => <option key={`proposal-${minutes}`} value={String(minutes)}>{minutes} 分鐘</option>)}
               </select>
             </Field>
             <Field label="投票時間（分鐘） (必填)">
               <select className="meal-field" value={createDraft.voteMinutes} onChange={(event) => setCreateDraft((current) => ({ ...current, voteMinutes: event.target.value }))}>
-                {stageDurationOptions.map((minutes) => <option key={`vote-${minutes}`} value={String(minutes)}>{minutes} 分鐘</option>)}
+                {voteDurationOptions.map((minutes) => <option key={`vote-${minutes}`} value={String(minutes)}>{minutes} 分鐘</option>)}
               </select>
             </Field>
             <Field label="點餐時間（分鐘） (必填)">
               <select className="meal-field" value={createDraft.orderMinutes} onChange={(event) => setCreateDraft((current) => ({ ...current, orderMinutes: event.target.value }))}>
-                {stageDurationOptions.map((minutes) => <option key={`order-${minutes}`} value={String(minutes)}>{minutes} 分鐘</option>)}
+                {orderingDurationOptions.map((minutes) => <option key={`order-${minutes}`} value={String(minutes)}>{minutes} 分鐘</option>)}
               </select>
             </Field>
             <div className="xl:col-span-3">
@@ -1407,4 +1412,11 @@ function formatApproxTWD(value: string | number | bigint) {
 
 function formatWeiFriendly(value: string | number | bigint) {
   return `${formatEth(value)} / ${formatApproxTWD(value)}`;
+}
+
+function durationOptions(options: number[] | undefined, fallback: number) {
+  const values = Array.from(new Set([fallback, ...(options || [])].filter((value) => Number.isFinite(value) && value > 0)))
+    .map((value) => Math.trunc(value))
+    .sort((left, right) => left - right);
+  return values.length ? values : [1];
 }

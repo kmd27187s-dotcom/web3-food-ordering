@@ -57,7 +57,6 @@ export function MemberSubscription() {
       const paid = await waitForSubscriptionPaid(txHash);
       await syncSubscription({
         txHash,
-        amountWei: paid.amountWei.toString(),
         expiresAt: new Date(paid.expiresAt * 1000).toISOString()
       });
       await refresh();

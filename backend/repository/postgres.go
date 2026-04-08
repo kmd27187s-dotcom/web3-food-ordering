@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -23,25 +24,25 @@ type PostgresStore struct {
 }
 
 type postgresMemberModel struct {
-	ID                       int64 `gorm:"primaryKey"`
-	Email                    string
-	PasswordHash             string
-	DisplayName              string `gorm:"not null"`
-	AvatarURL                string
-	WalletAddress            *string `gorm:"uniqueIndex"`
-	RegistrationInviteCode   *string `gorm:"uniqueIndex"`
-	IsAdmin                  bool    `gorm:"not null;default:false"`
-	Points                   int64   `gorm:"not null;default:0"`
-	TokenBalance             int64   `gorm:"not null;default:0"`
-	ProposalTicketCount      int64   `gorm:"not null;default:0"`
-	VoteTicketCount          int64   `gorm:"not null;default:0"`
-	CreateOrderTicketCount   int64   `gorm:"not null;default:0"`
-	ClaimableProposalTickets int64   `gorm:"not null;default:0"`
-	ClaimableVoteTickets     int64   `gorm:"not null;default:0"`
-	ClaimableCreateOrderTickets int64 `gorm:"not null;default:0"`
-	SubscriptionExpiresAt    *time.Time
-	LastDailyLoginRewardAt   *time.Time
-	CreatedAt                time.Time `gorm:"not null"`
+	ID                          int64 `gorm:"primaryKey"`
+	Email                       string
+	PasswordHash                string
+	DisplayName                 string `gorm:"not null"`
+	AvatarURL                   string
+	WalletAddress               *string `gorm:"uniqueIndex"`
+	RegistrationInviteCode      *string `gorm:"uniqueIndex"`
+	IsAdmin                     bool    `gorm:"not null;default:false"`
+	Points                      int64   `gorm:"not null;default:0"`
+	TokenBalance                int64   `gorm:"not null;default:0"`
+	ProposalTicketCount         int64   `gorm:"not null;default:0"`
+	VoteTicketCount             int64   `gorm:"not null;default:0"`
+	CreateOrderTicketCount      int64   `gorm:"not null;default:0"`
+	ClaimableProposalTickets    int64   `gorm:"not null;default:0"`
+	ClaimableVoteTickets        int64   `gorm:"not null;default:0"`
+	ClaimableCreateOrderTickets int64   `gorm:"not null;default:0"`
+	SubscriptionExpiresAt       *time.Time
+	LastDailyLoginRewardAt      *time.Time
+	CreatedAt                   time.Time `gorm:"not null"`
 }
 
 func (postgresMemberModel) TableName() string { return "members" }
@@ -103,11 +104,11 @@ type postgresRegistrationInviteUsageModel struct {
 func (postgresRegistrationInviteUsageModel) TableName() string { return "registration_invite_usages" }
 
 type postgresGroupInviteUsageModel struct {
-	ID           int64     `gorm:"primaryKey"`
-	GroupID       int64    `gorm:"not null;index"`
-	InviteCode   string    `gorm:"not null;index"`
-	UsedByMemberID int64   `gorm:"not null;index"`
-	UsedAt       time.Time `gorm:"not null"`
+	ID             int64     `gorm:"primaryKey"`
+	GroupID        int64     `gorm:"not null;index"`
+	InviteCode     string    `gorm:"not null;index"`
+	UsedByMemberID int64     `gorm:"not null;index"`
+	UsedAt         time.Time `gorm:"not null"`
 }
 
 func (postgresGroupInviteUsageModel) TableName() string { return "group_invite_usages" }
@@ -180,77 +181,77 @@ type postgresMenuChangeRequestModel struct {
 func (postgresMenuChangeRequestModel) TableName() string { return "menu_change_requests" }
 
 type postgresProposalModel struct {
-	ID               int64     `gorm:"primaryKey"`
-	Title            string    `gorm:"not null"`
-	Description      string    `gorm:"not null"`
-	MerchantGroup    string    `gorm:"not null"`
-	MealPeriod       string    `gorm:"not null;default:lunch"`
-	ProposalDate     string    `gorm:"not null"`
-	MaxOptions       int64     `gorm:"not null;default:5"`
-	CreatedBy        int64     `gorm:"not null;index"`
-	CreatedByName    string    `gorm:"not null"`
-	UsedCreateOrderTicket bool `gorm:"not null;default:false"`
-	CreateFeeWei     int64     `gorm:"not null;default:0"`
-	CreateFeeRefundWei int64   `gorm:"not null;default:0"`
-	CreateFeePlatformWei int64 `gorm:"not null;default:0"`
-	ProposalFeeWei   int64     `gorm:"not null;default:0"`
-	VoteFeeWei       int64     `gorm:"not null;default:0"`
-	WinnerProposalRefundBps int64 `gorm:"not null;default:0"`
-	LoserProposalRefundBps  int64 `gorm:"not null;default:0"`
-	VoteRefundBps    int64     `gorm:"not null;default:0"`
-	WinnerBonusBps   int64     `gorm:"not null;default:0"`
-	LoserBonusBps    int64     `gorm:"not null;default:0"`
-	WinnerProposalPoints int64 `gorm:"not null;default:0"`
-	WinnerVotePointsPerVote int64 `gorm:"not null;default:0"`
-	ProposalDeadline time.Time `gorm:"not null"`
-	VoteDeadline     time.Time `gorm:"not null"`
-	OrderDeadline    time.Time `gorm:"not null"`
-	WinnerOptionID   int64     `gorm:"not null;default:0"`
-	RewardsApplied   bool      `gorm:"not null;default:false"`
-	SettledAt        *time.Time
-	FailedReason     string
-	GroupID          *int64
-	CreatedAt        time.Time `gorm:"not null"`
+	ID                      int64     `gorm:"primaryKey"`
+	Title                   string    `gorm:"not null"`
+	Description             string    `gorm:"not null"`
+	MerchantGroup           string    `gorm:"not null"`
+	MealPeriod              string    `gorm:"not null;default:lunch"`
+	ProposalDate            string    `gorm:"not null"`
+	MaxOptions              int64     `gorm:"not null;default:5"`
+	CreatedBy               int64     `gorm:"not null;index"`
+	CreatedByName           string    `gorm:"not null"`
+	UsedCreateOrderTicket   bool      `gorm:"not null;default:false"`
+	CreateFeeWei            int64     `gorm:"not null;default:0"`
+	CreateFeeRefundWei      int64     `gorm:"not null;default:0"`
+	CreateFeePlatformWei    int64     `gorm:"not null;default:0"`
+	ProposalFeeWei          int64     `gorm:"not null;default:0"`
+	VoteFeeWei              int64     `gorm:"not null;default:0"`
+	WinnerProposalRefundBps int64     `gorm:"not null;default:0"`
+	LoserProposalRefundBps  int64     `gorm:"not null;default:0"`
+	VoteRefundBps           int64     `gorm:"not null;default:0"`
+	WinnerBonusBps          int64     `gorm:"not null;default:0"`
+	LoserBonusBps           int64     `gorm:"not null;default:0"`
+	WinnerProposalPoints    int64     `gorm:"not null;default:0"`
+	WinnerVotePointsPerVote int64     `gorm:"not null;default:0"`
+	ProposalDeadline        time.Time `gorm:"not null"`
+	VoteDeadline            time.Time `gorm:"not null"`
+	OrderDeadline           time.Time `gorm:"not null"`
+	WinnerOptionID          int64     `gorm:"not null;default:0"`
+	RewardsApplied          bool      `gorm:"not null;default:false"`
+	SettledAt               *time.Time
+	FailedReason            string
+	GroupID                 *int64
+	CreatedAt               time.Time `gorm:"not null"`
 }
 
 func (postgresProposalModel) TableName() string { return "proposals" }
 
 type postgresProposalOptionModel struct {
-	ID               int64     `gorm:"primaryKey"`
-	ProposalID       int64     `gorm:"not null;index;uniqueIndex:idx_proposal_options_proposal_merchant_unique"`
-	MerchantID       string    `gorm:"not null;uniqueIndex:idx_proposal_options_proposal_merchant_unique"`
-	MerchantName     string    `gorm:"not null"`
-	ProposerMemberID int64     `gorm:"not null;index"`
-	ProposerName     string    `gorm:"not null"`
-	UsedProposalTicket bool    `gorm:"not null;default:false"`
-	ProposalFeePaidWei int64   `gorm:"not null;default:0"`
-	VoteFeeCollectedWei int64  `gorm:"not null;default:0"`
-	VoteRefundWei    int64     `gorm:"not null;default:0"`
-	ProposerRefundWei int64    `gorm:"not null;default:0"`
-	ProposerRewardWei int64    `gorm:"not null;default:0"`
-	WeightedVotes    int64     `gorm:"not null;default:0"`
-	TokenStake       int64     `gorm:"not null;default:0"`
-	PartialRefund    int64     `gorm:"not null;default:0"`
-	WinnerTokenBack  int64     `gorm:"not null;default:0"`
-	CreatedAt        time.Time `gorm:"not null"`
+	ID                  int64     `gorm:"primaryKey"`
+	ProposalID          int64     `gorm:"not null;index;uniqueIndex:idx_proposal_options_proposal_merchant_unique"`
+	MerchantID          string    `gorm:"not null;uniqueIndex:idx_proposal_options_proposal_merchant_unique"`
+	MerchantName        string    `gorm:"not null"`
+	ProposerMemberID    int64     `gorm:"not null;index"`
+	ProposerName        string    `gorm:"not null"`
+	UsedProposalTicket  bool      `gorm:"not null;default:false"`
+	ProposalFeePaidWei  int64     `gorm:"not null;default:0"`
+	VoteFeeCollectedWei int64     `gorm:"not null;default:0"`
+	VoteRefundWei       int64     `gorm:"not null;default:0"`
+	ProposerRefundWei   int64     `gorm:"not null;default:0"`
+	ProposerRewardWei   int64     `gorm:"not null;default:0"`
+	WeightedVotes       int64     `gorm:"not null;default:0"`
+	TokenStake          int64     `gorm:"not null;default:0"`
+	PartialRefund       int64     `gorm:"not null;default:0"`
+	WinnerTokenBack     int64     `gorm:"not null;default:0"`
+	CreatedAt           time.Time `gorm:"not null"`
 }
 
 func (postgresProposalOptionModel) TableName() string { return "proposal_options" }
 
 type postgresVoteModel struct {
-	ID           int64     `gorm:"primaryKey"`
-	ProposalID   int64     `gorm:"not null;uniqueIndex:idx_votes_proposal_member_unique"`
-	MemberID     int64     `gorm:"not null;uniqueIndex:idx_votes_proposal_member_unique"`
-	MemberName   string    `gorm:"not null"`
-	OptionID     int64     `gorm:"not null;index"`
-	TokenAmount  int64     `gorm:"not null"`
-	FeeAmountWei int64     `gorm:"not null;default:0"`
-	VoteWeight   int64     `gorm:"not null"`
-	VoteCount    int64     `gorm:"not null;default:0"`
-	RefundWei    int64     `gorm:"not null;default:0"`
-	UseVoteTicket bool     `gorm:"not null;default:false"`
-	SubmittedAt  time.Time `gorm:"not null"`
-	WalletHidden bool      `gorm:"not null;default:true"`
+	ID            int64     `gorm:"primaryKey"`
+	ProposalID    int64     `gorm:"not null;uniqueIndex:idx_votes_proposal_member_unique"`
+	MemberID      int64     `gorm:"not null;uniqueIndex:idx_votes_proposal_member_unique"`
+	MemberName    string    `gorm:"not null"`
+	OptionID      int64     `gorm:"not null;index"`
+	TokenAmount   int64     `gorm:"not null"`
+	FeeAmountWei  int64     `gorm:"not null;default:0"`
+	VoteWeight    int64     `gorm:"not null"`
+	VoteCount     int64     `gorm:"not null;default:0"`
+	RefundWei     int64     `gorm:"not null;default:0"`
+	UseVoteTicket bool      `gorm:"not null;default:false"`
+	SubmittedAt   time.Time `gorm:"not null"`
+	WalletHidden  bool      `gorm:"not null;default:true"`
 }
 
 func (postgresVoteModel) TableName() string { return "votes" }
@@ -514,6 +515,9 @@ func defaultGovernanceParams() *models.GovernanceParams {
 		ProposalDurationMinutes:     defaultProposalDurationMinutes,
 		VoteDurationMinutes:         defaultVoteDurationMinutes,
 		OrderingDurationMinutes:     defaultOrderingDurationMinutes,
+		ProposalDurationOptions:     []int64{1, 10, 20, 30, 40, 50, 60, 70, 80, 90},
+		VoteDurationOptions:         []int64{1, 10, 20, 30, 40, 50, 60, 70, 80, 90},
+		OrderingDurationOptions:     []int64{1, 10, 20, 30, 40, 50, 60, 70, 80, 90},
 		DailyCreateCouponCount:      defaultDailyCreateCouponCount,
 		DailyProposalCouponCount:    defaultDailyProposalCouponCount,
 		DailyVoteCouponCount:        defaultDailyVoteCouponCount,
@@ -541,6 +545,9 @@ func (s *PostgresStore) GovernanceParams() (*models.GovernanceParams, error) {
 	if decodeErr := json.Unmarshal([]byte(setting.Value), merged); decodeErr != nil {
 		return params, nil
 	}
+	merged.ProposalDurationOptions = normalizeDurationOptions(merged.ProposalDurationOptions, merged.ProposalDurationMinutes)
+	merged.VoteDurationOptions = normalizeDurationOptions(merged.VoteDurationOptions, merged.VoteDurationMinutes)
+	merged.OrderingDurationOptions = normalizeDurationOptions(merged.OrderingDurationOptions, merged.OrderingDurationMinutes)
 	return merged, nil
 }
 
@@ -549,6 +556,9 @@ func (s *PostgresStore) SetGovernanceParams(params *models.GovernanceParams) (*m
 	if params == nil {
 		params = defaultGovernanceParams()
 	}
+	params.ProposalDurationOptions = normalizeDurationOptions(params.ProposalDurationOptions, params.ProposalDurationMinutes)
+	params.VoteDurationOptions = normalizeDurationOptions(params.VoteDurationOptions, params.VoteDurationMinutes)
+	params.OrderingDurationOptions = normalizeDurationOptions(params.OrderingDurationOptions, params.OrderingDurationMinutes)
 	payload, err := json.Marshal(params)
 	if err != nil {
 		return nil, err
@@ -561,6 +571,30 @@ func (s *PostgresStore) SetGovernanceParams(params *models.GovernanceParams) (*m
 		return nil, err
 	}
 	return s.GovernanceParams()
+}
+
+func normalizeDurationOptions(options []int64, fallback int64) []int64 {
+	seen := map[int64]struct{}{}
+	result := make([]int64, 0, len(options)+1)
+	if fallback > 0 {
+		seen[fallback] = struct{}{}
+		result = append(result, fallback)
+	}
+	for _, option := range options {
+		if option <= 0 {
+			continue
+		}
+		if _, exists := seen[option]; exists {
+			continue
+		}
+		seen[option] = struct{}{}
+		result = append(result, option)
+	}
+	sort.Slice(result, func(i, j int) bool { return result[i] < result[j] })
+	if len(result) == 0 {
+		return []int64{1, 10, 20, 30, 40, 50, 60, 70, 80, 90}
+	}
+	return result
 }
 
 func (s *PostgresStore) LinkProposalChain(localProposalID, chainProposalID int64) error {
@@ -691,13 +725,13 @@ func (s *PostgresStore) CreateMember(email, passwordHash, displayName string, is
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
 		member = postgresMemberModel{
-			Email:                    email,
-			PasswordHash:             passwordHash,
-			DisplayName:              displayName,
-			AvatarURL:                avatarURL,
-			IsAdmin:                  isAdmin,
-			TokenBalance:             tokenBalance,
-			CreatedAt:                now,
+			Email:                       email,
+			PasswordHash:                passwordHash,
+			DisplayName:                 displayName,
+			AvatarURL:                   avatarURL,
+			IsAdmin:                     isAdmin,
+			TokenBalance:                tokenBalance,
+			CreatedAt:                   now,
 			ProposalTicketCount:         0,
 			VoteTicketCount:             0,
 			CreateOrderTicketCount:      0,
@@ -836,9 +870,9 @@ func (s *PostgresStore) SetSubscriptionExpiry(memberID int64, expiresAt time.Tim
 func (s *PostgresStore) AddClaimableTickets(memberID, proposalTickets int64) error {
 	ctx := context.Background()
 	return s.db.WithContext(ctx).Model(&postgresMemberModel{}).Where("id = ?", memberID).Updates(map[string]any{
-		"claimable_proposal_tickets":      gorm.Expr("claimable_proposal_tickets + ?", proposalTickets),
-		"claimable_vote_tickets":          gorm.Expr("claimable_vote_tickets + ?", proposalTickets),
-		"claimable_create_order_tickets":  gorm.Expr("claimable_create_order_tickets + ?", proposalTickets),
+		"claimable_proposal_tickets":     gorm.Expr("claimable_proposal_tickets + ?", proposalTickets),
+		"claimable_vote_tickets":         gorm.Expr("claimable_vote_tickets + ?", proposalTickets),
+		"claimable_create_order_tickets": gorm.Expr("claimable_create_order_tickets + ?", proposalTickets),
 	}).Error
 }
 
@@ -869,11 +903,11 @@ func (s *PostgresStore) ClaimTickets(memberID int64) (proposalTickets int64, vot
 			return errors.New("no claimable tickets")
 		}
 		return tx.Model(&postgresMemberModel{}).Where("id = ?", memberID).Updates(map[string]any{
-			"proposal_ticket_count":         gorm.Expr("proposal_ticket_count + ?", proposalTickets),
-			"vote_ticket_count":             gorm.Expr("vote_ticket_count + ?", voteTickets),
-			"create_order_ticket_count":     gorm.Expr("create_order_ticket_count + ?", createOrderTickets),
-			"claimable_proposal_tickets":    0,
-			"claimable_vote_tickets":        0,
+			"proposal_ticket_count":          gorm.Expr("proposal_ticket_count + ?", proposalTickets),
+			"vote_ticket_count":              gorm.Expr("vote_ticket_count + ?", voteTickets),
+			"create_order_ticket_count":      gorm.Expr("create_order_ticket_count + ?", createOrderTickets),
+			"claimable_proposal_tickets":     0,
+			"claimable_vote_tickets":         0,
 			"claimable_create_order_tickets": 0,
 		}).Error
 	})
@@ -901,7 +935,7 @@ func (s *PostgresStore) GrantDailyLoginProposalTicket(memberID int64, now time.T
 			"claimable_proposal_tickets":     gorm.Expr("claimable_proposal_tickets + ?", params.DailyProposalCouponCount),
 			"claimable_vote_tickets":         gorm.Expr("claimable_vote_tickets + ?", params.DailyVoteCouponCount),
 			"claimable_create_order_tickets": gorm.Expr("claimable_create_order_tickets + ?", params.DailyCreateCouponCount),
-			"last_daily_login_reward_at": now.UTC(),
+			"last_daily_login_reward_at":     now.UTC(),
 		}).Error; err != nil {
 			return err
 		}
@@ -978,30 +1012,30 @@ func (s *PostgresStore) CreateProposal(memberID int64, title, description, merch
 		params = defaultGovernanceParams()
 	}
 	proposal := &postgresProposalModel{
-		Title:                    title,
-		Description:              description,
-		MerchantGroup:            merchantGroup,
-		MealPeriod:               mealPeriod,
-		ProposalDate:             proposalDate,
-		MaxOptions:               maxOptions,
-		CreatedBy:                memberID,
-		CreatedByName:            createdByName,
-		CreateFeeWei:             params.CreateFeeWei,
-		ProposalFeeWei:           params.ProposalFeeWei,
-		VoteFeeWei:               params.VoteFeeWei,
-		WinnerProposalRefundBps:  params.WinnerProposalRefundBps,
-		LoserProposalRefundBps:   params.LoserProposalRefundBps,
-		VoteRefundBps:            params.VoteRefundBps,
-		WinnerBonusBps:           params.WinnerBonusBps,
-		LoserBonusBps:            params.LoserBonusBps,
-		WinnerProposalPoints:     params.WinnerProposalPoints,
-		WinnerVotePointsPerVote:  params.WinnerVotePointsPerVote,
-		ProposalDeadline:         proposalDeadline.UTC(),
-		VoteDeadline:             voteDeadline.UTC(),
-		OrderDeadline:            orderDeadline.UTC(),
-		WinnerOptionID:           0,
-		RewardsApplied:           false,
-		CreatedAt:                now,
+		Title:                   title,
+		Description:             description,
+		MerchantGroup:           merchantGroup,
+		MealPeriod:              mealPeriod,
+		ProposalDate:            proposalDate,
+		MaxOptions:              maxOptions,
+		CreatedBy:               memberID,
+		CreatedByName:           createdByName,
+		CreateFeeWei:            params.CreateFeeWei,
+		ProposalFeeWei:          params.ProposalFeeWei,
+		VoteFeeWei:              params.VoteFeeWei,
+		WinnerProposalRefundBps: params.WinnerProposalRefundBps,
+		LoserProposalRefundBps:  params.LoserProposalRefundBps,
+		VoteRefundBps:           params.VoteRefundBps,
+		WinnerBonusBps:          params.WinnerBonusBps,
+		LoserBonusBps:           params.LoserBonusBps,
+		WinnerProposalPoints:    params.WinnerProposalPoints,
+		WinnerVotePointsPerVote: params.WinnerVotePointsPerVote,
+		ProposalDeadline:        proposalDeadline.UTC(),
+		VoteDeadline:            voteDeadline.UTC(),
+		OrderDeadline:           orderDeadline.UTC(),
+		WinnerOptionID:          0,
+		RewardsApplied:          false,
+		CreatedAt:               now,
 	}
 	if err := s.db.WithContext(ctx).Create(proposal).Error; err != nil {
 		if isDuplicateKeyError(err) {
@@ -1254,7 +1288,7 @@ func (s *PostgresStore) RecordVote(proposalID, memberID, optionID int64, voteCou
 			}
 		}
 		if err := tx.Model(&postgresProposalOptionModel{}).Where("id = ?", optionID).Updates(map[string]any{
-			"weighted_votes":        gorm.Expr("weighted_votes + ?", voteCount),
+			"weighted_votes":         gorm.Expr("weighted_votes + ?", voteCount),
 			"vote_fee_collected_wei": gorm.Expr("vote_fee_collected_wei + ?", actualFee),
 		}).Error; err != nil {
 			return err
@@ -2956,12 +2990,12 @@ func (s *PostgresStore) GetInviteByCode(code string) (*models.GroupInvite, error
 func (s *PostgresStore) ListGroupInviteUsages(groupID int64) ([]*models.GroupInviteUsage, error) {
 	ctx := context.Background()
 	type usageRow struct {
-		ID            int64
+		ID             int64
 		GroupID        int64
-		InviteCode    string
+		InviteCode     string
 		UsedByMemberID int64
-		UsedByName    string
-		UsedAt        time.Time
+		UsedByName     string
+		UsedAt         time.Time
 	}
 	var rows []usageRow
 	if err := s.db.WithContext(ctx).
@@ -2976,12 +3010,12 @@ func (s *PostgresStore) ListGroupInviteUsages(groupID int64) ([]*models.GroupInv
 	items := make([]*models.GroupInviteUsage, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, &models.GroupInviteUsage{
-			ID:            row.ID,
-			GroupID:       row.GroupID,
-			InviteCode:    row.InviteCode,
+			ID:             row.ID,
+			GroupID:        row.GroupID,
+			InviteCode:     row.InviteCode,
 			UsedByMemberID: row.UsedByMemberID,
-			UsedByName:    row.UsedByName,
-			UsedAt:        row.UsedAt.UTC().Format(time.RFC3339),
+			UsedByName:     row.UsedByName,
+			UsedAt:         row.UsedAt.UTC().Format(time.RFC3339),
 		})
 	}
 	return items, nil
@@ -3008,10 +3042,10 @@ func (s *PostgresStore) AddMemberByInvite(groupID, memberID int64, inviteCode st
 		}
 		if existing == 0 {
 			if err := tx.Create(&postgresGroupInviteUsageModel{
-				GroupID:       groupID,
-				InviteCode:    inviteCode,
+				GroupID:        groupID,
+				InviteCode:     inviteCode,
 				UsedByMemberID: memberID,
-				UsedAt:        time.Now().UTC(),
+				UsedAt:         time.Now().UTC(),
 			}).Error; err != nil {
 				return err
 			}
@@ -3411,27 +3445,27 @@ func (s *PostgresStore) memberByQuery(apply func(*gorm.DB) *gorm.DB) (*models.Me
 
 func (s *PostgresStore) memberFromModel(member *postgresMemberModel) *models.Member {
 	result := &models.Member{
-		ID:                         member.ID,
-		Email:                      member.Email,
-		PasswordHash:               member.PasswordHash,
-		DisplayName:                member.DisplayName,
-		AvatarURL:                  member.AvatarURL,
-		IsAdmin:                    member.IsAdmin,
-		Points:                     member.Points,
-		TokenBalance:               member.TokenBalance,
-		ProposalTicketCount:        member.ProposalTicketCount,
-		VoteTicketCount:            member.VoteTicketCount,
-		CreateOrderTicketCount:     member.CreateOrderTicketCount,
-		ProposalCouponCount:        member.ProposalTicketCount,
-		VoteCouponCount:            member.VoteTicketCount,
-		CreateOrderCouponCount:     member.CreateOrderTicketCount,
-		ClaimableProposalTickets:   member.ClaimableProposalTickets,
-		ClaimableVoteTickets:       member.ClaimableVoteTickets,
+		ID:                          member.ID,
+		Email:                       member.Email,
+		PasswordHash:                member.PasswordHash,
+		DisplayName:                 member.DisplayName,
+		AvatarURL:                   member.AvatarURL,
+		IsAdmin:                     member.IsAdmin,
+		Points:                      member.Points,
+		TokenBalance:                member.TokenBalance,
+		ProposalTicketCount:         member.ProposalTicketCount,
+		VoteTicketCount:             member.VoteTicketCount,
+		CreateOrderTicketCount:      member.CreateOrderTicketCount,
+		ProposalCouponCount:         member.ProposalTicketCount,
+		VoteCouponCount:             member.VoteTicketCount,
+		CreateOrderCouponCount:      member.CreateOrderTicketCount,
+		ClaimableProposalTickets:    member.ClaimableProposalTickets,
+		ClaimableVoteTickets:        member.ClaimableVoteTickets,
 		ClaimableCreateOrderTickets: member.ClaimableCreateOrderTickets,
-		ClaimableProposalCoupons:   member.ClaimableProposalTickets,
-		ClaimableVoteCoupons:       member.ClaimableVoteTickets,
+		ClaimableProposalCoupons:    member.ClaimableProposalTickets,
+		ClaimableVoteCoupons:        member.ClaimableVoteTickets,
 		ClaimableCreateOrderCoupons: member.ClaimableCreateOrderTickets,
-		CreatedAt:                  member.CreatedAt.UTC(),
+		CreatedAt:                   member.CreatedAt.UTC(),
 	}
 	if member.WalletAddress != nil {
 		result.WalletAddress = *member.WalletAddress
@@ -3655,17 +3689,17 @@ func (s *PostgresStore) refreshProposalState(ctx context.Context, proposalID int
 			if totalVotes == 0 {
 				proposal.WinnerOptionID = 0
 			} else {
-			var winner postgresProposalOptionModel
-			if err := tx.Where("proposal_id = ?", proposalID).Order("weighted_votes DESC, id ASC").First(&winner).Error; err != nil {
-				if errors.Is(err, gorm.ErrRecordNotFound) {
-					return nil
+				var winner postgresProposalOptionModel
+				if err := tx.Where("proposal_id = ?", proposalID).Order("weighted_votes DESC, id ASC").First(&winner).Error; err != nil {
+					if errors.Is(err, gorm.ErrRecordNotFound) {
+						return nil
+					}
+					return err
 				}
-				return err
-			}
-			if err := tx.Model(&postgresProposalModel{}).Where("id = ?", proposalID).Update("winner_option_id", winner.ID).Error; err != nil {
-				return err
-			}
-			proposal.WinnerOptionID = winner.ID
+				if err := tx.Model(&postgresProposalModel{}).Where("id = ?", proposalID).Update("winner_option_id", winner.ID).Error; err != nil {
+					return err
+				}
+				proposal.WinnerOptionID = winner.ID
 			}
 		}
 
@@ -3701,10 +3735,10 @@ func (s *PostgresStore) applyLocalSettlementRewards(ctx context.Context, proposa
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if proposal.TotalVoteCount == 0 {
 			return tx.Model(&postgresProposalModel{}).Where("id = ?", proposalID).Updates(map[string]any{
-				"rewards_applied":        true,
-				"settled_at":             time.Now().UTC(),
+				"rewards_applied":         true,
+				"settled_at":              time.Now().UTC(),
 				"create_fee_platform_wei": proposal.CreateFeeWei,
-				"failed_reason":          "no_votes_cast",
+				"failed_reason":           "no_votes_cast",
 			}).Error
 		}
 
@@ -3732,11 +3766,11 @@ func (s *PostgresStore) applyLocalSettlementRewards(ctx context.Context, proposa
 				proposerRewardWei = ((opt.VoteFeeCollectedWei - voteRefundWei) * proposal.LoserBonusBps) / 10000
 			}
 			if err := tx.Model(&postgresProposalOptionModel{}).Where("id = ?", opt.ID).Updates(map[string]any{
-				"vote_refund_wei":      voteRefundWei,
-				"proposer_refund_wei":  proposerRefundWei,
-				"proposer_reward_wei":  proposerRewardWei,
-				"partial_refund":       proposerRefundWei,
-				"winner_token_back":    proposerRewardWei,
+				"vote_refund_wei":     voteRefundWei,
+				"proposer_refund_wei": proposerRefundWei,
+				"proposer_reward_wei": proposerRewardWei,
+				"partial_refund":      proposerRefundWei,
+				"winner_token_back":   proposerRewardWei,
 			}).Error; err != nil {
 				return err
 			}

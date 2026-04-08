@@ -5,10 +5,16 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { fetchGovernanceParams, updateGovernanceParams, type GovernanceParams } from "@/lib/api";
 
+type NumericGovernanceKey = {
+  [K in keyof GovernanceParams]: GovernanceParams[K] extends number | undefined ? K : never;
+}[keyof GovernanceParams];
+
+type DurationStage = "proposal" | "vote" | "ordering";
+
 const fieldGroups: Array<{
   title: string;
   description: string;
-  fields: Array<{ key: keyof GovernanceParams; label: string; help: string }>;
+  fields: Array<{ key: NumericGovernanceKey; label: string; help: string }>;
 }> = [
   {
     title: "費率設定",
@@ -45,11 +51,17 @@ const fieldGroups: Array<{
   },
   {
     title: "時間設定",
-    description: "建立新 round 後會套用到新的提案、投票、點餐與 timeout 規則。",
+    description: "在同一區塊設定每個階段的預設分鐘數，以及前端下拉式選單可讓會員選擇的時間組合。",
     fields: [
-      { key: "proposalDurationMinutes", label: "提案階段分鐘數 (必填)", help: "新建立訂單預設提案階段長度。" },
-      { key: "voteDurationMinutes", label: "投票階段分鐘數 (必填)", help: "新建立訂單預設投票階段長度。" },
-      { key: "orderingDurationMinutes", label: "點餐階段分鐘數 (必填)", help: "新建立訂單預設點餐階段長度。" },
+      { key: "proposalDurationMinutes", label: "提案階段預設分鐘數 (必填)", help: "如果前端沒有另外指定，會先帶入這個預設值。" },
+      { key: "voteDurationMinutes", label: "投票階段預設分鐘數 (必填)", help: "如果前端沒有另外指定，會先帶入這個預設值。" },
+      { key: "orderingDurationMinutes", label: "點餐階段預設分鐘數 (必填)", help: "如果前端沒有另外指定，會先帶入這個預設值。" },
+    ]
+  },
+  {
+    title: "逾時設定",
+    description: "店家、會員與 claim timeout 等逾時規則。",
+    fields: [
       { key: "merchantAcceptTimeoutMins", label: "店家接單逾時分鐘數 (必填)", help: "超過此時間可進入逾時處理。" },
       { key: "merchantCompleteTimeoutMins", label: "店家完成逾時分鐘數 (必填)", help: "店家已接單後最晚應完成的時間。" },
       { key: "memberConfirmTimeoutMins", label: "會員確認逾時分鐘數 (必填)", help: "超過後可自動視為已完成。" },
@@ -68,28 +80,87 @@ const fieldGroups: Array<{
 
 export function AdminGovernanceSettings() {
   const [params, setParams] = useState<GovernanceParams | null>(null);
+  const [durationOptionText, setDurationOptionText] = useState({
+    proposal: "",
+    vote: "",
+    ordering: ""
+  });
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
 
   useEffect(() => {
     fetchGovernanceParams()
-      .then(setParams)
+      .then((next) => {
+        setParams(next);
+        setDurationOptionText({
+          proposal: (next.proposalDurationOptions || [next.proposalDurationMinutes]).join(", "),
+          vote: (next.voteDurationOptions || [next.voteDurationMinutes]).join(", "),
+          ordering: (next.orderingDurationOptions || [next.orderingDurationMinutes]).join(", ")
+        });
+      })
       .catch((error) => setMessage(error instanceof Error ? error.message : "讀取治理參數失敗"))
       .finally(() => setLoading(false));
   }, []);
 
   const fieldCount = useMemo(() => fieldGroups.reduce((sum, group) => sum + group.fields.length, 0), []);
+  const currentDurationOptions = useMemo(
+    () => ({
+      proposal: parseOptionText(durationOptionText.proposal, params?.proposalDurationMinutes ?? 1),
+      vote: parseOptionText(durationOptionText.vote, params?.voteDurationMinutes ?? 1),
+      ordering: parseOptionText(durationOptionText.ordering, params?.orderingDurationMinutes ?? 1)
+    }),
+    [durationOptionText, params]
+  );
 
-  function updateField(key: keyof GovernanceParams, value: string) {
+  function updateField(key: NumericGovernanceKey, value: string) {
     setParams((current) => {
       if (!current) return current;
       const next = Number(value);
+      const fieldKey = key as string;
       return {
         ...current,
-        [key]: Number.isFinite(next) ? next : 0
+        [fieldKey]: Number.isFinite(next) ? next : 0
+      } as GovernanceParams;
+    });
+  }
+
+  function parseOptionText(value: string, fallback: number) {
+    const values = value
+      .split(",")
+      .map((item) => Number(item.trim()))
+      .filter((item) => Number.isFinite(item) && item > 0)
+      .map((item) => Math.trunc(item));
+    return Array.from(new Set([fallback, ...values])).sort((a, b) => a - b);
+  }
+
+  function removeDurationOption(stage: "proposal" | "vote" | "ordering", minutes: number) {
+    setDurationOptionText((current) => {
+      const fallback =
+        stage === "proposal"
+          ? params?.proposalDurationMinutes ?? 1
+          : stage === "vote"
+            ? params?.voteDurationMinutes ?? 1
+            : params?.orderingDurationMinutes ?? 1;
+      const nextValues = parseOptionText(current[stage], fallback).filter((item) => item !== minutes);
+      return {
+        ...current,
+        [stage]: nextValues.join(", ")
       };
     });
+  }
+
+  function getDurationStageConfig(key: NumericGovernanceKey): { stage: DurationStage; options: number[]; text: string } | null {
+    if (key === "proposalDurationMinutes") {
+      return { stage: "proposal", options: currentDurationOptions.proposal, text: durationOptionText.proposal };
+    }
+    if (key === "voteDurationMinutes") {
+      return { stage: "vote", options: currentDurationOptions.vote, text: durationOptionText.vote };
+    }
+    if (key === "orderingDurationMinutes") {
+      return { stage: "ordering", options: currentDurationOptions.ordering, text: durationOptionText.ordering };
+    }
+    return null;
   }
 
   async function handleSave() {
@@ -97,8 +168,18 @@ export function AdminGovernanceSettings() {
     setPending(true);
     setMessage("");
     try {
-      const next = await updateGovernanceParams(params);
+      const next = await updateGovernanceParams({
+        ...params,
+        proposalDurationOptions: parseOptionText(durationOptionText.proposal, params.proposalDurationMinutes),
+        voteDurationOptions: parseOptionText(durationOptionText.vote, params.voteDurationMinutes),
+        orderingDurationOptions: parseOptionText(durationOptionText.ordering, params.orderingDurationMinutes)
+      });
       setParams(next);
+      setDurationOptionText({
+        proposal: (next.proposalDurationOptions || [next.proposalDurationMinutes]).join(", "),
+        vote: (next.voteDurationOptions || [next.voteDurationMinutes]).join(", "),
+        ordering: (next.orderingDurationOptions || [next.orderingDurationMinutes]).join(", ")
+      });
       setMessage("治理參數已更新，之後新建立的 round 會套用新數值。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "更新治理參數失敗");
@@ -138,11 +219,46 @@ export function AdminGovernanceSettings() {
                   type="number"
                   min={0}
                   className="meal-field"
-                  value={params[field.key]}
+                  value={Number(params[field.key as keyof GovernanceParams] ?? 0)}
                   onChange={(event) => updateField(field.key, event.target.value)}
                   placeholder={field.label}
                 />
                 <span className="text-xs leading-6 text-muted-foreground">{field.help}</span>
+                {(() => {
+                  const durationConfig = getDurationStageConfig(field.key);
+                  if (!durationConfig) return null;
+                  return (
+                    <div className="mt-2 rounded-[1rem] border border-border/70 bg-secondary/30 p-3">
+                      <p className="text-xs font-semibold text-foreground">前端可選時間</p>
+                      <p className="mt-1 text-xs leading-6 text-muted-foreground">
+                        目前已設定 {durationConfig.options.length} 種選項。可直接在下方輸入多個分鐘數，或點擊既有選項移除。
+                      </p>
+                      <input
+                        className="meal-field mt-3"
+                        value={durationConfig.text}
+                        onChange={(event) =>
+                          setDurationOptionText((current) => ({
+                            ...current,
+                            [durationConfig.stage]: event.target.value
+                          }))
+                        }
+                        placeholder="1, 10, 20, 30"
+                      />
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {durationConfig.options.map((item) => (
+                          <button
+                            key={`${durationConfig.stage}-${item}`}
+                            type="button"
+                            className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-foreground transition hover:border-destructive hover:text-destructive"
+                            onClick={() => removeDurationOption(durationConfig.stage, item)}
+                          >
+                            {item} 分鐘 ×
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })()}
               </label>
             ))}
           </div>

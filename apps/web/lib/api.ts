@@ -38,6 +38,9 @@ export type GovernanceParams = {
   proposalDurationMinutes: number;
   voteDurationMinutes: number;
   orderingDurationMinutes: number;
+  proposalDurationOptions?: number[];
+  voteDurationOptions?: number[];
+  orderingDurationOptions?: number[];
   dailyCreateCouponCount: number;
   dailyProposalCouponCount: number;
   dailyVoteCouponCount: number;
@@ -769,7 +772,6 @@ export async function verifyWalletLogin(payload: {
 
 export async function syncSubscription(payload: {
   txHash: string;
-  amountWei: string;
   expiresAt: string;
 }) {
   return apiRequest<Member>("/subscription/sync", {

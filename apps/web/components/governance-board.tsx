@@ -15,12 +15,14 @@ import {
   fetchMe,
   fetchMerchants,
   fetchMerchant,
+  fetchPublicGovernanceParams,
   fetchProposals,
   finalizeOrder,
   quoteVote,
   registerPendingTransaction,
   signOrder,
   type ContractInfo,
+  type GovernanceParams,
   type Group,
   type Member,
   type Merchant,
@@ -36,12 +38,12 @@ type GovernanceState = {
   groups: Group[];
   proposals: Proposal[];
   contractInfo: ContractInfo | null;
+  governanceParams: GovernanceParams | null;
 };
 
 type GovernanceTab = "proposing" | "voting" | "ordering";
 type WorkflowStage = "create" | "proposal" | "voting" | "ordering" | "submitted";
 
-const stageDurationOptions = [1, 10, 20, 30, 40, 50, 60, 70, 80, 90] as const;
 const APPROX_TWD_PER_ETH = 120000;
 const stageMeta: Record<WorkflowStage, { title: string; body: string }> = {
   create: {
@@ -87,7 +89,7 @@ const defaultCreateDraft: CreateDraft = {
 };
 
 export function GovernanceBoard() {
-  const [state, setState] = useState<GovernanceState>({ member: null, groups: [], proposals: [], contractInfo: null });
+  const [state, setState] = useState<GovernanceState>({ member: null, groups: [], proposals: [], contractInfo: null, governanceParams: null });
   const [loading, setLoading] = useState(true);
   const [actionPending, setActionPending] = useState(false);
   const [message, setMessage] = useState("");
@@ -103,24 +105,29 @@ export function GovernanceBoard() {
   const [orderItems, setOrderItems] = useState<Record<number, Record<string, number>>>({});
 
   const refresh = useCallback(async () => {
-    const [member, groups, proposals, contractInfo, merchantList] = await Promise.all([
+    const [member, groups, proposals, contractInfo, merchantList, governanceParams] = await Promise.all([
       fetchMe(),
       fetchGroups(),
       fetchProposals(),
       fetchContractInfo().catch(() => null),
-      fetchMerchants().catch(() => [])
+      fetchMerchants().catch(() => []),
+      fetchPublicGovernanceParams().catch(() => null)
     ]);
     const enrichedGroups = await Promise.all(groups.map((group) => fetchGroup(group.id)));
     setState({
       member,
       groups: enrichedGroups,
       proposals: safeArray(proposals).map(normalizeProposal),
-      contractInfo
+      contractInfo,
+      governanceParams
     });
     setMerchants(Array.isArray(merchantList) ? merchantList : []);
     setCreateDraft((current) => ({
       ...current,
-      groupId: current.groupId || (enrichedGroups[0] ? String(enrichedGroups[0].id) : "")
+      groupId: current.groupId || (enrichedGroups[0] ? String(enrichedGroups[0].id) : ""),
+      proposalMinutes: current.proposalMinutes || String(governanceParams?.proposalDurationMinutes || 1),
+      voteMinutes: current.voteMinutes || String(governanceParams?.voteDurationMinutes || 1),
+      orderMinutes: current.orderMinutes || String(governanceParams?.orderingDurationMinutes || 1)
     }));
   }, []);
 
@@ -190,6 +197,10 @@ export function GovernanceBoard() {
         .catch(() => undefined);
     });
   }, [menus, state.proposals]);
+
+  const proposalDurationOptions = useMemo(() => durationOptions(state.governanceParams?.proposalDurationOptions, state.governanceParams?.proposalDurationMinutes ?? 1), [state.governanceParams?.proposalDurationMinutes, state.governanceParams?.proposalDurationOptions]);
+  const voteDurationOptions = useMemo(() => durationOptions(state.governanceParams?.voteDurationOptions, state.governanceParams?.voteDurationMinutes ?? 1), [state.governanceParams?.voteDurationMinutes, state.governanceParams?.voteDurationOptions]);
+  const orderingDurationOptions = useMemo(() => durationOptions(state.governanceParams?.orderingDurationOptions, state.governanceParams?.orderingDurationMinutes ?? 1), [state.governanceParams?.orderingDurationMinutes, state.governanceParams?.orderingDurationOptions]);
 
   const grouped = useMemo(
     () => ({
@@ -554,7 +565,7 @@ export function GovernanceBoard() {
                   value={createDraft.proposalMinutes}
                   onChange={(event) => setCreateDraft((current) => ({ ...current, proposalMinutes: event.target.value }))}
                 >
-                  {stageDurationOptions.map((minutes) => (
+                  {proposalDurationOptions.map((minutes) => (
                     <option key={`proposal-${minutes}`} value={String(minutes)}>
                       {minutes} 分鐘
                     </option>
@@ -567,7 +578,7 @@ export function GovernanceBoard() {
                   value={createDraft.voteMinutes}
                   onChange={(event) => setCreateDraft((current) => ({ ...current, voteMinutes: event.target.value }))}
                 >
-                  {stageDurationOptions.map((minutes) => (
+                  {voteDurationOptions.map((minutes) => (
                     <option key={`vote-${minutes}`} value={String(minutes)}>
                       {minutes} 分鐘
                     </option>
@@ -580,7 +591,7 @@ export function GovernanceBoard() {
                   value={createDraft.orderMinutes}
                   onChange={(event) => setCreateDraft((current) => ({ ...current, orderMinutes: event.target.value }))}
                 >
-                  {stageDurationOptions.map((minutes) => (
+                  {orderingDurationOptions.map((minutes) => (
                     <option key={`order-${minutes}`} value={String(minutes)}>
                       {minutes} 分鐘
                     </option>
@@ -1189,4 +1200,13 @@ function nextProposalTransitionAt(proposals: Proposal[]) {
   }
 
   return nextAt;
+}
+
+function durationOptions(options: number[] | undefined, fallback: number) {
+  const values = safeArray(options)
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item) && item > 0)
+    .map((item) => Math.trunc(item));
+  const normalized = Array.from(new Set([fallback, ...values])).sort((a, b) => a - b);
+  return normalized.length ? normalized : [1];
 }

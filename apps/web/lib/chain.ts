@@ -22,7 +22,7 @@ export const GOVERNANCE_ABI = parseAbi([
   "event RoundCreated(uint256 indexed roundId, address indexed creator, bytes32 indexed groupKey, uint256 proposalDeadline, uint256 voteDeadline, uint256 orderingDeadline)",
   "event MerchantProposed(uint256 indexed roundId, uint256 indexed candidateId, bytes32 indexed merchantKey, address proposer, bool usedCoupon)",
   "event VoteCast(uint256 indexed roundId, uint256 indexed candidateId, address indexed voter, uint256 voteCount, uint256 feeAmountWei, bool usedCoupon)",
-  "event SubscriptionPaid(address indexed member, uint256 amountWei, uint256 expiresAt)",
+  "event SubscriptionPaid(address indexed member, uint256 expiresAt)",
   "event SubscriptionCancelled(address indexed member, uint256 cancelledAt)"
 ]);
 
@@ -33,7 +33,7 @@ export const ESCROW_ABI = parseAbi([
   "function merchantComplete(uint256 orderId)",
   "function memberConfirmReceived(uint256 orderId)",
   "function releasePayout(uint256 orderId)",
-  "event OrderEscrowOpened(uint256 indexed orderId, uint256 indexed roundId, bytes32 indexed winnerMerchantKey, address merchantWallet)",
+  "event OrderEscrowOpened(uint256 indexed orderId, uint256 indexed roundId, bytes32 indexed winnerMerchantKey, address merchantWallet, bytes32 groupKey, bytes32 menuSnapshotHash, bytes32 orderDetailHash, bytes32 participantHash, uint256 totalParticipants, uint256 totalQuantity, uint256 totalOrderAmountWei)",
   "event OrderPaymentSubmitted(uint256 indexed orderId, address indexed payer, uint256 amountWei)",
   "event MerchantAccepted(uint256 indexed orderId, address indexed merchantWallet)",
   "event MerchantCompleted(uint256 indexed orderId, address indexed merchantWallet)",
@@ -184,7 +184,6 @@ export async function waitForSubscriptionPaid(txHash: `0x${string}`) {
       });
       if (decoded.eventName === "SubscriptionPaid") {
         return {
-          amountWei: BigInt(String(decoded.args.amountWei)),
           expiresAt: Number(decoded.args.expiresAt)
         };
       }

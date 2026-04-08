@@ -55,7 +55,6 @@ export function SubscriptionCheckpoint() {
       const paid = await waitForSubscriptionPaid(txHash);
       await syncSubscription({
         txHash,
-        amountWei: paid.amountWei.toString(),
         expiresAt: new Date(paid.expiresAt * 1000).toISOString()
       });
       router.replace("/member");
