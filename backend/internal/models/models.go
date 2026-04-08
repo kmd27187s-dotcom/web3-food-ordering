@@ -61,6 +61,8 @@ type GovernanceParams struct {
 	DailyCreateCouponCount      int64   `json:"dailyCreateCouponCount"`
 	DailyProposalCouponCount    int64   `json:"dailyProposalCouponCount"`
 	DailyVoteCouponCount        int64   `json:"dailyVoteCouponCount"`
+	AutoPayoutEnabled           bool    `json:"autoPayoutEnabled"`
+	AutoPayoutDelayDays         int64   `json:"autoPayoutDelayDays"`
 	PlatformEscrowFeeBps        int64   `json:"platformEscrowFeeBps"`
 	MerchantAcceptTimeoutMins   int64   `json:"merchantAcceptTimeoutMins"`
 	MerchantCompleteTimeoutMins int64   `json:"merchantCompleteTimeoutMins"`
@@ -443,17 +445,19 @@ type MerchantDashboard struct {
 }
 
 type ReadyPayoutOrder struct {
-	OrderID               int64     `json:"orderId"`
-	ProposalID            int64     `json:"proposalId"`
-	EscrowOrderID         *int64    `json:"escrowOrderId,omitempty"`
-	Title                 string    `json:"title"`
-	MemberName            string    `json:"memberName"`
-	MerchantID            string    `json:"merchantId"`
-	MerchantName          string    `json:"merchantName"`
-	MerchantPayoutAddress string    `json:"merchantPayoutAddress"`
-	AmountWei             string    `json:"amountWei"`
-	Status                string    `json:"status"`
-	CreatedAt             time.Time `json:"createdAt"`
+	OrderID               int64      `json:"orderId"`
+	ProposalID            int64      `json:"proposalId"`
+	EscrowOrderID         *int64     `json:"escrowOrderId,omitempty"`
+	Title                 string     `json:"title"`
+	MemberName            string     `json:"memberName"`
+	MerchantID            string     `json:"merchantId"`
+	MerchantName          string     `json:"merchantName"`
+	MerchantPayoutAddress string     `json:"merchantPayoutAddress"`
+	AmountWei             string     `json:"amountWei"`
+	Status                string     `json:"status"`
+	CreatedAt             time.Time  `json:"createdAt"`
+	ConfirmedAt           *time.Time `json:"confirmedAt,omitempty"`
+	AutoPayoutAt          *time.Time `json:"autoPayoutAt,omitempty"`
 }
 
 type AdminDashboard struct {

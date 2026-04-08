@@ -4,8 +4,25 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
-import { cancelSubscription, fetchContractInfo, fetchMe, fetchPublicGovernanceParams, syncSubscription, type ContractInfo, type GovernanceParams, type Member } from "@/lib/api";
+import { cancelSubscription, fetchContractInfo, fetchMe, fetchPublicGovernanceParams, registerPendingTransaction, syncSubscription, type ContractInfo, type GovernanceParams, type Member } from "@/lib/api";
 import { isUsableContractAddress, sendNativePayment, toFriendlyWalletError } from "@/lib/chain";
+
+const SUBSCRIPTION_SYNC_KEY = "member-subscription-pending-sync";
+
+function readPendingSubscriptionSync() {
+  if (typeof window === "undefined") return "";
+  return window.sessionStorage.getItem(SUBSCRIPTION_SYNC_KEY) || "";
+}
+
+function writePendingSubscriptionSync(txHash: string) {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(SUBSCRIPTION_SYNC_KEY, txHash);
+}
+
+function clearPendingSubscriptionSync() {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(SUBSCRIPTION_SYNC_KEY);
+}
 
 export function MemberSubscription() {
   const [member, setMember] = useState<Member | null>(null);
@@ -26,6 +43,22 @@ export function MemberSubscription() {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (loading) return;
+    const pendingTxHash = readPendingSubscriptionSync();
+    if (!pendingTxHash) return;
+    setPending(true);
+    setMessage("偵測到上一筆訂閱付款已送出，正在補回同步結果...");
+    syncSubscription({ txHash: pendingTxHash, expiresAt: "" })
+      .then(async () => {
+        clearPendingSubscriptionSync();
+        await refresh();
+        setMessage("上一筆訂閱付款已成功補回同步。");
+      })
+      .catch(() => setMessage("上一筆訂閱付款已送出，但同步仍在處理中。請稍後重新整理確認結果，暫時不要重複付款。"))
+      .finally(() => setPending(false));
+  }, [loading]);
+
   async function refresh() {
     const [nextMember, nextContract, nextParams] = await Promise.all([
       fetchMe(),
@@ -39,6 +72,8 @@ export function MemberSubscription() {
 
   async function handleSubscribe() {
     setPending(true);
+    setMessage("");
+    let paymentSubmitted = false;
     try {
       const activeContractInfo = contractInfo;
       if (!isUsableContractAddress(activeContractInfo?.platformTreasury) || !member?.walletAddress || !governanceParams) {
@@ -48,14 +83,32 @@ export function MemberSubscription() {
         activeContractInfo!.platformTreasury as `0x${string}`,
         BigInt(governanceParams.subscriptionFeeWei)
       );
+      writePendingSubscriptionSync(hash);
+      paymentSubmitted = true;
+      await registerPendingTransaction({
+        proposalId: 0,
+        action: "subscribe",
+        txHash: hash,
+        walletAddress: member.walletAddress || undefined
+      }).catch(() => undefined);
       await syncSubscription({
         txHash: hash,
         expiresAt: ""
       });
-      await refresh();
+      clearPendingSubscriptionSync();
+      try {
+        await refresh();
+      } catch {
+        setMessage("付款已送出，但訂閱狀態同步較慢，請重新整理後確認是否已開通。");
+        return;
+      }
       setMessage("月訂閱已開通，期限已更新。");
     } catch (error) {
-      setMessage(toFriendlyWalletError(error, "訂閱付款未成功，請重新操作。"));
+      setMessage(
+        paymentSubmitted
+          ? "付款已送出，但訂閱同步失敗。請重新整理確認是否已開通；若仍未更新，再重新操作。"
+          : toFriendlyWalletError(error, "訂閱付款未成功，請重新操作。")
+      );
     } finally {
       setPending(false);
     }

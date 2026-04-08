@@ -57,32 +57,23 @@ func deriveStatus(proposal *models.Proposal) string {
 	case 1:
 		return "upcoming"
 	}
-	if proposal.ChainProposalID != nil {
-		switch {
-		case proposal.RewardsApplied:
-			return "settled"
-		case now.Before(proposal.ProposalDeadline):
-			return "proposing"
-		case now.Before(proposal.VoteDeadline):
-			return "voting"
-		case proposal.WinnerOptionID == 0:
-			return "awaiting_finalization"
-		case now.Before(proposal.OrderDeadline):
-			return "ordering"
-		default:
-			return "awaiting_settlement"
-		}
-	}
 	switch {
-	case proposal.RewardsApplied:
-		return "settled"
 	case now.Before(proposal.ProposalDeadline):
 		return "proposing"
 	case now.Before(proposal.VoteDeadline):
 		return "voting"
 	case now.Before(proposal.OrderDeadline):
+		if proposal.FailedReason == "no_votes_cast" {
+			return "failed"
+		}
 		return "ordering"
 	default:
+		if proposal.FailedReason == "no_votes_cast" {
+			return "failed"
+		}
+		if proposal.RewardsApplied || proposal.WinnerOptionID > 0 {
+			return "settled"
+		}
 		return "awaiting_settlement"
 	}
 }
@@ -111,7 +102,7 @@ func compareProposalDate(proposalDate string) int {
 }
 
 func shouldAutoSettleLocalProposal(proposal *models.Proposal) bool {
-	if proposal == nil || proposal.ChainProposalID != nil || proposal.RewardsApplied {
+	if proposal == nil || proposal.RewardsApplied {
 		return false
 	}
 	if !isCurrentProposalDay(proposal.ProposalDate) {
@@ -244,4 +235,24 @@ func repositoryBusinessLocation() *time.Location {
 		return time.Local
 	}
 	return location
+}
+
+func autoPayoutAtForOrder(confirmedAt *time.Time, delayDays int64) *time.Time {
+	if confirmedAt == nil {
+		return nil
+	}
+	if delayDays < 0 {
+		delayDays = 0
+	}
+	local := confirmedAt.In(repositoryBusinessLocation())
+	target := time.Date(local.Year(), local.Month(), local.Day()+int(delayDays), 23, 59, 0, 0, repositoryBusinessLocation()).UTC()
+	return &target
+}
+
+func toUTCPtr(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	normalized := value.UTC()
+	return &normalized
 }

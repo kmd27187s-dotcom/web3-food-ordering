@@ -27,6 +27,7 @@ func main() {
 	}
 
 	runtime.StartInactiveGroupPruner(ctx, log.Default())
+	runtime.StartAutoPayoutProcessor(ctx, log.Default())
 	runtime.SyncChainOnStart(context.Background(), log.Default())
 
 	router := gin.New()

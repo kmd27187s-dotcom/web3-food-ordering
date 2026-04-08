@@ -1,13 +1,18 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
 
 	"mealvoting/backend/internal/models"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func nextEffectiveMidnight(now time.Time) time.Time {
@@ -467,10 +472,73 @@ func (s *Server) handleAdminMarkOrderPaid(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid order id")
 		return
 	}
-	order, err := s.orderRepo.UpdateAdminOrderStatus(orderID, "platform_paid")
+	orders, err := s.processAdminPayouts(r.Context(), []int64{orderID})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, order)
+	writeJSON(w, http.StatusOK, orders[0])
+}
+
+func (s *Server) handleAdminBatchMarkOrderPaid(w http.ResponseWriter, r *http.Request, memberID int64) {
+	var body struct {
+		OrderIDs []int64 `json:"orderIds"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	orders, err := s.processAdminPayouts(r.Context(), body.OrderIDs)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count":  len(orders),
+		"orders": orders,
+	})
+}
+
+func (s *Server) processAdminPayouts(ctx context.Context, orderIDs []int64) ([]*models.Order, error) {
+	if len(orderIDs) == 0 {
+		return nil, errors.New("select at least one order")
+	}
+	if s.chain == nil {
+		return nil, errors.New("blockchain client unavailable")
+	}
+	dashboard, err := s.adminRepo.AdminDashboard()
+	if err != nil {
+		return nil, err
+	}
+	readyByID := make(map[int64]*models.ReadyPayoutOrder, len(dashboard.ReadyPayoutOrders))
+	for _, order := range dashboard.ReadyPayoutOrders {
+		readyByID[order.OrderID] = order
+	}
+	seen := make(map[int64]struct{}, len(orderIDs))
+	results := make([]*models.Order, 0, len(orderIDs))
+	for _, orderID := range orderIDs {
+		if orderID <= 0 {
+			return nil, errors.New("invalid order id")
+		}
+		if _, exists := seen[orderID]; exists {
+			continue
+		}
+		seen[orderID] = struct{}{}
+		order := readyByID[orderID]
+		if order == nil {
+			return nil, fmt.Errorf("order %d is not waiting for payout", orderID)
+		}
+		if !common.IsHexAddress(strings.TrimSpace(order.MerchantPayoutAddress)) {
+			return nil, fmt.Errorf("order %d has invalid merchant payout wallet", orderID)
+		}
+		if _, err := s.chain.SendNativeTransfer(ctx, order.MerchantPayoutAddress, order.AmountWei); err != nil {
+			return nil, err
+		}
+		updated, err := s.orderRepo.UpdateAdminOrderStatus(orderID, "platform_paid")
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, updated)
+	}
+	return results, nil
 }

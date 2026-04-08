@@ -521,6 +521,8 @@ func defaultGovernanceParams() *models.GovernanceParams {
 		DailyCreateCouponCount:      defaultDailyCreateCouponCount,
 		DailyProposalCouponCount:    defaultDailyProposalCouponCount,
 		DailyVoteCouponCount:        defaultDailyVoteCouponCount,
+		AutoPayoutEnabled:           defaultAutoPayoutEnabled,
+		AutoPayoutDelayDays:         defaultAutoPayoutDelayDays,
 		PlatformEscrowFeeBps:        defaultPlatformEscrowFeeBps,
 		MerchantAcceptTimeoutMins:   defaultMerchantAcceptTimeoutMins,
 		MerchantCompleteTimeoutMins: defaultMerchantCompleteTimeoutMins,
@@ -559,6 +561,9 @@ func (s *PostgresStore) SetGovernanceParams(params *models.GovernanceParams) (*m
 	params.ProposalDurationOptions = normalizeDurationOptions(params.ProposalDurationOptions, params.ProposalDurationMinutes)
 	params.VoteDurationOptions = normalizeDurationOptions(params.VoteDurationOptions, params.VoteDurationMinutes)
 	params.OrderingDurationOptions = normalizeDurationOptions(params.OrderingDurationOptions, params.OrderingDurationMinutes)
+	if params.AutoPayoutDelayDays < 0 {
+		params.AutoPayoutDelayDays = 0
+	}
 	payload, err := json.Marshal(params)
 	if err != nil {
 		return nil, err
@@ -873,6 +878,15 @@ func (s *PostgresStore) AddClaimableTickets(memberID, proposalTickets int64) err
 		"claimable_proposal_tickets":     gorm.Expr("claimable_proposal_tickets + ?", proposalTickets),
 		"claimable_vote_tickets":         gorm.Expr("claimable_vote_tickets + ?", proposalTickets),
 		"claimable_create_order_tickets": gorm.Expr("claimable_create_order_tickets + ?", proposalTickets),
+	}).Error
+}
+
+func (s *PostgresStore) AddTickets(memberID, ticketCount int64) error {
+	ctx := context.Background()
+	return s.db.WithContext(ctx).Model(&postgresMemberModel{}).Where("id = ?", memberID).Updates(map[string]any{
+		"proposal_ticket_count":     gorm.Expr("proposal_ticket_count + ?", ticketCount),
+		"vote_ticket_count":         gorm.Expr("vote_ticket_count + ?", ticketCount),
+		"create_order_ticket_count": gorm.Expr("create_order_ticket_count + ?", ticketCount),
 	}).Error
 }
 
@@ -1574,6 +1588,18 @@ func (s *PostgresStore) UpdateAdminOrderStatus(orderID int64, status string) (*m
 		return nil, err
 	}
 	return s.findMerchantOrderByID(strings.TrimSpace(row.MerchantID), orderID)
+}
+
+func (s *PostgresStore) UpdateAdminOrderStatuses(orderIDs []int64, status string) ([]*models.Order, error) {
+	results := make([]*models.Order, 0, len(orderIDs))
+	for _, orderID := range orderIDs {
+		order, err := s.UpdateAdminOrderStatus(orderID, status)
+		if err != nil {
+			return nil, err
+		}
+		results = append(results, order)
+	}
+	return results, nil
 }
 
 func (s *PostgresStore) findMerchantOrderByID(merchantID string, orderID int64) (*models.Order, error) {
@@ -2575,14 +2601,19 @@ func (s *PostgresStore) AdminDashboard() (*models.AdminDashboard, error) {
 		AmountWei     string
 		Status        string
 		CreatedAt     time.Time
+		ConfirmedAt   *time.Time
 	}
 	if err := s.db.WithContext(ctx).
 		Table("orders AS o").
-		Select("o.id, o.proposal_id, o.escrow_order_id, o.member_name, o.merchant_id, m.name AS merchant_name, m.payout_address, o.amount_wei, o.status, o.created_at").
+		Select("o.id, o.proposal_id, o.escrow_order_id, o.member_name, o.merchant_id, m.name AS merchant_name, m.payout_address, o.amount_wei, o.status, o.created_at, o.confirmed_at").
 		Joins("JOIN merchants AS m ON m.id = o.merchant_id").
 		Where("o.status = ?", "ready_for_payout").
 		Order("o.created_at ASC").
 		Scan(&payoutRows).Error; err != nil {
+		return nil, err
+	}
+	params, err := s.GovernanceParams()
+	if err != nil {
 		return nil, err
 	}
 	readyPayoutOrders := make([]*models.ReadyPayoutOrder, 0, len(payoutRows))
@@ -2599,11 +2630,9 @@ func (s *PostgresStore) AdminDashboard() (*models.AdminDashboard, error) {
 			AmountWei:             row.AmountWei,
 			Status:                row.Status,
 			CreatedAt:             row.CreatedAt.UTC(),
+			ConfirmedAt:           toUTCPtr(row.ConfirmedAt),
+			AutoPayoutAt:          autoPayoutAtForOrder(row.ConfirmedAt, params.AutoPayoutDelayDays),
 		})
-	}
-	params, err := s.GovernanceParams()
-	if err != nil {
-		return nil, err
 	}
 	return &models.AdminDashboard{
 		MemberCount:            memberCount,
@@ -2885,6 +2914,27 @@ func (s *PostgresStore) ListPendingTransactions(memberID int64, limit int) ([]*m
 		items = append(items, pendingTxFromModel(&row))
 	}
 	return items, nil
+}
+
+func (s *PostgresStore) UpdatePendingTransaction(memberID int64, txHash, status string, proposalID int64, relatedEvent, relatedOrder, errorMessage string) (*models.PendingTransaction, error) {
+	ctx := context.Background()
+	updates := map[string]any{
+		"status":        status,
+		"updated_at":    time.Now().UTC(),
+		"related_event": relatedEvent,
+		"related_order": relatedOrder,
+		"error_message": errorMessage,
+	}
+	if proposalID > 0 {
+		updates["proposal_id"] = proposalID
+	}
+	if err := s.db.WithContext(ctx).
+		Model(&postgresPendingTransactionModel{}).
+		Where("member_id = ? AND tx_hash = ?", memberID, txHash).
+		Updates(updates).Error; err != nil {
+		return nil, err
+	}
+	return s.GetPendingTransaction(memberID, txHash)
 }
 
 func (s *PostgresStore) LogUsage(memberID, proposalID int64, action, assetType, direction, amount, note, reference string) error {
@@ -3667,14 +3717,6 @@ func (s *PostgresStore) refreshProposalState(ctx context.Context, proposalID int
 		if err := tx.First(&proposal, "id = ?", proposalID).Error; err != nil {
 			return err
 		}
-		var chainMapCount int64
-		if err := tx.Model(&postgresProposalChainMapModel{}).Where("local_proposal_id = ?", proposalID).Count(&chainMapCount).Error; err != nil {
-			return err
-		}
-		if chainMapCount > 0 {
-			return nil
-		}
-
 		var optCount int64
 		if err := tx.Model(&postgresProposalOptionModel{}).Where("proposal_id = ?", proposalID).Count(&optCount).Error; err != nil {
 			return err

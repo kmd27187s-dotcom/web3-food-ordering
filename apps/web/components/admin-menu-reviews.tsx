@@ -94,7 +94,7 @@ export function AdminMenuReviews() {
                   <p className="mt-2 text-sm text-muted-foreground">{request.description || "無描述"}</p>
                 </div>
                 <div className="text-right">
-                  <p className="font-semibold">{request.priceWei} Wei</p>
+                  <p className="font-semibold">{formatWeiToEth(request.priceWei)} ETH</p>
                   {request.effectiveAt ? <p className="mt-1 text-sm text-muted-foreground">預計生效 {new Date(request.effectiveAt).toLocaleString("zh-TW")}</p> : null}
                 </div>
               </div>
@@ -112,4 +112,12 @@ export function AdminMenuReviews() {
       {message ? <p className="text-sm text-[hsl(7_65%_42%)]">{message}</p> : null}
     </div>
   );
+}
+
+function formatWeiToEth(value: number) {
+  const amount = BigInt(value || 0);
+  const integer = amount / 10n ** 18n;
+  const fraction = amount % 10n ** 18n;
+  const fractionText = fraction.toString().padStart(18, "0").slice(0, 4).replace(/0+$/, "");
+  return `${integer.toString()}${fractionText ? `.${fractionText}` : ""}`;
 }

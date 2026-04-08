@@ -703,8 +703,11 @@ func TestRegistrationInviteRewardsCanBeClaimedByInviterAndInvitee(t *testing.T) 
 	if !ok {
 		t.Fatalf("expected dave member payload, got %T", daveVerifyBody["member"])
 	}
-	if daveMember["claimableProposalTickets"] != float64(2) || daveMember["claimableVoteTickets"] != float64(2) || daveMember["claimableCreateOrderTickets"] != float64(2) {
-		t.Fatalf("expected dave to receive 2 claimable coupons of each type (daily login + invite), got %+v", daveMember)
+	if daveMember["claimableProposalTickets"] != float64(1) || daveMember["claimableVoteTickets"] != float64(1) || daveMember["claimableCreateOrderTickets"] != float64(1) {
+		t.Fatalf("expected dave to receive 1 daily claimable coupon of each type, got %+v", daveMember)
+	}
+	if daveMember["proposalTicketCount"] != float64(1) || daveMember["voteTicketCount"] != float64(1) || daveMember["createOrderTicketCount"] != float64(1) {
+		t.Fatalf("expected dave to receive 1 invite coupon of each type directly, got %+v", daveMember)
 	}
 
 	aliceAfterInvite := performAuthorizedJSONRequest(t, handler, http.MethodGet, "/members/me", aliceToken, nil)
@@ -712,8 +715,11 @@ func TestRegistrationInviteRewardsCanBeClaimedByInviterAndInvitee(t *testing.T) 
 		t.Fatalf("expected alice member fetch after invite to return 200, got %d: %s", aliceAfterInvite.Code, aliceAfterInvite.Body.String())
 	}
 	aliceAfterBody := decodeJSONBody(t, aliceAfterInvite)
-	if aliceAfterBody["claimableProposalTickets"] != float64(2) || aliceAfterBody["claimableVoteTickets"] != float64(2) || aliceAfterBody["claimableCreateOrderTickets"] != float64(2) {
-		t.Fatalf("expected alice to receive 2 claimable coupons of each type (daily login + invite), got %+v", aliceAfterBody)
+	if aliceAfterBody["claimableProposalTickets"] != float64(1) || aliceAfterBody["claimableVoteTickets"] != float64(1) || aliceAfterBody["claimableCreateOrderTickets"] != float64(1) {
+		t.Fatalf("expected alice to keep only 1 daily claimable coupon of each type, got %+v", aliceAfterBody)
+	}
+	if aliceAfterBody["proposalTicketCount"] != float64(1) || aliceAfterBody["voteTicketCount"] != float64(1) || aliceAfterBody["createOrderTicketCount"] != float64(1) {
+		t.Fatalf("expected alice to receive 1 invite coupon of each type directly, got %+v", aliceAfterBody)
 	}
 
 	daveClaim := performAuthorizedJSONRequest(t, handler, http.MethodPost, "/members/tickets/claim", daveToken, map[string]any{})
@@ -721,11 +727,11 @@ func TestRegistrationInviteRewardsCanBeClaimedByInviterAndInvitee(t *testing.T) 
 		t.Fatalf("expected dave claim to return 200, got %d: %s", daveClaim.Code, daveClaim.Body.String())
 	}
 	daveClaimBody := decodeJSONBody(t, daveClaim)
-	if daveClaimBody["claimedProposalTickets"] != float64(2) {
-		t.Fatalf("expected dave claim response to report two proposal tickets, got %+v", daveClaimBody)
+	if daveClaimBody["claimedProposalTickets"] != float64(1) {
+		t.Fatalf("expected dave claim response to report one daily proposal ticket, got %+v", daveClaimBody)
 	}
-	if daveClaimBody["claimedVoteTickets"] != float64(2) || daveClaimBody["claimedCreateOrderTickets"] != float64(2) {
-		t.Fatalf("expected dave claim response to report two vote and create-order tickets, got %+v", daveClaimBody)
+	if daveClaimBody["claimedVoteTickets"] != float64(1) || daveClaimBody["claimedCreateOrderTickets"] != float64(1) {
+		t.Fatalf("expected dave claim response to report one daily vote and create-order ticket, got %+v", daveClaimBody)
 	}
 	daveClaimMember, ok := daveClaimBody["member"].(map[string]any)
 	if !ok {

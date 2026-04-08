@@ -126,9 +126,9 @@ export function AdminDashboard() {
         </p>
         {governanceParams ? (
           <div className="mt-5 grid gap-3 md:grid-cols-3">
-            <SummaryStat label="建立訂單費" value={`${governanceParams.createFeeWei} Wei`} />
-            <SummaryStat label="提案費" value={`${governanceParams.proposalFeeWei} Wei`} />
-            <SummaryStat label="投票費" value={`${governanceParams.voteFeeWei} Wei / 票`} />
+            <SummaryStat label="建立訂單費" value={`${formatWeiToEth(governanceParams.createFeeWei)} ETH`} />
+            <SummaryStat label="提案費" value={`${formatWeiToEth(governanceParams.proposalFeeWei)} ETH`} />
+            <SummaryStat label="投票費" value={`${formatWeiToEth(governanceParams.voteFeeWei)} ETH / 票`} />
           </div>
         ) : null}
       </section>
@@ -165,6 +165,14 @@ export function AdminDashboard() {
       {message ? <p className="text-sm text-[hsl(7_65%_42%)]">{message}</p> : null}
     </div>
   );
+}
+
+function formatWeiToEth(value: number) {
+  const amount = BigInt(value || 0);
+  const integer = amount / 10n ** 18n;
+  const fraction = amount % 10n ** 18n;
+  const fractionText = fraction.toString().padStart(18, "0").slice(0, 4).replace(/0+$/, "");
+  return `${integer.toString()}${fractionText ? `.${fractionText}` : ""}`;
 }
 
 function SummaryStat({ label, value }: { label: string; value: string }) {

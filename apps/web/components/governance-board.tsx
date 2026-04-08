@@ -453,7 +453,7 @@ export function GovernanceBoard() {
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <Stat label="我的提案券" value={`${state.member?.proposalTicketCount || 0} 張`} />
             <Stat label="目前群組" value={`${state.groups.length} 個`} />
-            <Stat label="鏈上模式" value={isUsableContractAddress(state.contractInfo?.orderContract) ? "Sepolia 已配置" : "本地 fallback"} />
+            <Stat label="付款模式" value={isUsableContractAddress(state.contractInfo?.platformTreasury) ? "平台錢包交易紀錄" : "尚未設定平台錢包"} />
           </div>
         </div>
         <div className="mt-8 grid gap-5 lg:grid-cols-[0.78fr_1.22fr] lg:items-end">
@@ -695,7 +695,6 @@ export function GovernanceBoard() {
               }, BigInt(0));
               const hasPaidOrder = Boolean(myOrder);
               const canSubmitOrder = proposal.status === "ordering" && selectedItems.length > 0 && !hasPaidOrder;
-              const canUseChainOrder = isUsableContractAddress(state.contractInfo?.orderContract);
               return (
                 <ProposalCard key={proposal.id} proposal={proposal}>
                   <div className="space-y-4">
@@ -705,12 +704,6 @@ export function GovernanceBoard() {
                       <p className="mt-2 text-sm text-muted-foreground">
                         本輪總額 {formatWeiFriendly(proposal.orderTotalWei)} · {proposal.orderMemberCount} 人點餐
                       </p>
-                      {proposal.chainProposalId ? (
-                        <p className="mt-2 text-xs text-muted-foreground">
-                          chainProposalId: {proposal.chainProposalId}
-                          {isUsableContractAddress(state.contractInfo?.orderContract) ? " · 會直接走 Sepolia 合約送單" : " · 合約地址未配置，將退回本地點餐"}
-                        </p>
-                      ) : null}
                     </div>
                     {proposal.status === "ordering" && merchant?.menu?.length ? (
                       <div className="space-y-4">
@@ -774,7 +767,7 @@ export function GovernanceBoard() {
                               <p className="mt-2 text-lg font-semibold text-foreground">{formatWeiFriendly(selectedSubtotalWei)}</p>
                               <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                                 <Wallet className="h-4 w-4" />
-                                {canUseChainOrder ? "本輪會喚起 MetaMask 進行 Sepolia 合約支付。" : "本輪會先付款到平台中心錢包，待後續結算撥款給店家。"}
+                                本輪會先付款到平台中心錢包，鏈上只保留交易紀錄，後續由地端狀態同步處理。
                               </p>
                             </div>
                             <Button onClick={() => handleOrder(proposal, merchant)} disabled={actionPending || !canSubmitOrder}>

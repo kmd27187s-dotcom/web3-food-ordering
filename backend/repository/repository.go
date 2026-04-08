@@ -53,6 +53,7 @@ type MemberRepo interface {
 	UpdateMemberWallet(memberID int64, wallet string) error
 	SetSubscriptionExpiry(memberID int64, expiresAt time.Time) error
 	AddClaimableTickets(memberID, proposalTickets int64) error
+	AddTickets(memberID, ticketCount int64) error
 	ClaimTickets(memberID int64) (proposalTickets int64, voteTickets int64, createOrderTickets int64, err error)
 	GrantDailyLoginProposalTicket(memberID int64, now time.Time) (granted bool, err error)
 	SaveWalletAuthChallenge(walletAddress, nonce, message string, expiresAt time.Time) error
@@ -85,6 +86,7 @@ type OrderRepo interface {
 	UpdateOrderStatus(orderID int64, merchantID, status string) (*models.Order, error)
 	UpdateMemberOrderStatus(orderID, memberID int64, status string) (*models.Order, error)
 	UpdateAdminOrderStatus(orderID int64, status string) (*models.Order, error)
+	UpdateAdminOrderStatuses(orderIDs []int64, status string) ([]*models.Order, error)
 }
 
 // MerchantRepo handles merchant lookup.
@@ -131,6 +133,7 @@ type TransactionRepo interface {
 	RegisterPendingTransaction(memberID, proposalID int64, action, txHash, walletAddress, relatedOrder string) (*models.PendingTransaction, error)
 	GetPendingTransaction(memberID int64, txHash string) (*models.PendingTransaction, error)
 	ListPendingTransactions(memberID int64, limit int) ([]*models.PendingTransaction, error)
+	UpdatePendingTransaction(memberID int64, txHash, status string, proposalID int64, relatedEvent, relatedOrder, errorMessage string) (*models.PendingTransaction, error)
 }
 
 // UsageRepo tracks member token/native usage records.

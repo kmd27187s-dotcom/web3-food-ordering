@@ -44,6 +44,8 @@ export type GovernanceParams = {
   dailyCreateCouponCount: number;
   dailyProposalCouponCount: number;
   dailyVoteCouponCount: number;
+  autoPayoutEnabled: boolean;
+  autoPayoutDelayDays: number;
   platformEscrowFeeBps: number;
   merchantAcceptTimeoutMins: number;
   merchantCompleteTimeoutMins: number;
@@ -159,7 +161,6 @@ export type MerchantDetail = {
 
 export type ProposalOption = {
   id: number;
-  chainOptionIndex?: number | null;
   merchantId: string;
   merchantName: string;
   proposerMemberId: number;
@@ -185,7 +186,6 @@ export type OrderItem = {
 export type Order = {
   id: number;
   proposalId: number;
-  escrowOrderId?: number;
   title?: string;
   memberId: number;
   memberName: string;
@@ -205,7 +205,6 @@ export type Order = {
 
 export type Proposal = {
   id: number;
-  chainProposalId?: number | null;
   title: string;
   description: string;
   merchantGroup: string;
@@ -297,7 +296,6 @@ export type ContractInfo = {
   chainId: number;
   governanceContract: string;
   orderEscrowContract: string;
-  orderContract: string;
   platformTreasury: string;
   signerAddress: string;
 };
@@ -375,7 +373,6 @@ export type MerchantDelistRequest = {
 export type ReadyPayoutOrder = {
   orderId: number;
   proposalId: number;
-  escrowOrderId?: number;
   title: string;
   memberName: string;
   merchantId: string;
@@ -384,6 +381,8 @@ export type ReadyPayoutOrder = {
   amountWei: string;
   status: string;
   createdAt: string;
+  confirmedAt?: string;
+  autoPayoutAt?: string;
 };
 
 export type AdminDashboard = {
@@ -590,7 +589,7 @@ export async function createProposal(payload: {
   orderMinutes: number;
   groupId: number;
   useCreateOrderTicket?: boolean;
-  chainProposalId?: number;
+  txHash?: string;
 }) {
   return apiRequest<Proposal>("/proposals", {
     method: "POST",
@@ -606,11 +605,11 @@ export async function deleteProposal(proposalId: number) {
   });
 }
 
-export async function addProposalOption(proposalId: number, merchantId: string, useProposalTicket = false, chainOptionIndex?: number) {
+export async function addProposalOption(proposalId: number, merchantId: string, useProposalTicket = false, txHash?: string) {
   return apiRequest<ProposalOption>(`/proposals/${proposalId}/options`, {
     method: "POST",
     auth: true,
-    body: JSON.stringify({ merchantId, useProposalTicket, chainOptionIndex })
+    body: JSON.stringify({ merchantId, useProposalTicket, txHash })
   });
 }
 
@@ -622,11 +621,11 @@ export async function quoteVote(proposalId: number, voteCount: number, useVoteTi
   });
 }
 
-export async function voteProposal(proposalId: number, optionId: number, voteCount: number, useVoteTicket = false) {
+export async function voteProposal(proposalId: number, optionId: number, voteCount: number, useVoteTicket = false, txHash?: string) {
   return apiRequest<Proposal>(`/proposals/${proposalId}/votes`, {
     method: "POST",
     auth: true,
-    body: JSON.stringify({ optionId, voteCount, useVoteTicket })
+    body: JSON.stringify({ optionId, voteCount, useVoteTicket, txHash })
   });
 }
 
@@ -654,8 +653,8 @@ export async function signOrder(proposalId: number, items: Record<string, number
 export async function finalizeOrder(payload: {
   proposalId: number;
   items: Record<string, number>;
-  escrowOrderId?: number;
   signature?: OrderSignResponse["signature"];
+  txHash?: string;
 }) {
   return apiRequest<Order>("/orders/finalize", {
     method: "POST",
@@ -961,6 +960,14 @@ export async function markAdminOrderPaid(orderId: number) {
     method: "POST",
     auth: true,
     body: JSON.stringify({})
+  });
+}
+
+export async function markAdminOrdersPaid(orderIds: number[]) {
+  return apiRequest<{ count: number; orders: Order[] }>(`/admin/orders/payout/batch`, {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify({ orderIds })
   });
 }
 

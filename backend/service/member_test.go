@@ -119,6 +119,17 @@ func (m *mockMemberRepo) AddClaimableTickets(memberID, proposalTickets int64) er
 	}
 	return errors.New("member not found")
 }
+func (m *mockMemberRepo) AddTickets(memberID, ticketCount int64) error {
+	for _, mem := range m.members {
+		if mem.ID == memberID {
+			mem.ProposalTicketCount += ticketCount
+			mem.VoteTicketCount += ticketCount
+			mem.CreateOrderTicketCount += ticketCount
+			return nil
+		}
+	}
+	return errors.New("member not found")
+}
 func (m *mockMemberRepo) ClaimTickets(memberID int64) (int64, int64, int64, error) {
 	for _, mem := range m.members {
 		if mem.ID == memberID {

@@ -11,6 +11,13 @@ type NumericGovernanceKey = {
 
 type DurationStage = "proposal" | "vote" | "ordering";
 
+const feeKeys = new Set<NumericGovernanceKey>([
+  "createFeeWei",
+  "proposalFeeWei",
+  "voteFeeWei",
+  "subscriptionFeeWei"
+]);
+
 const fieldGroups: Array<{
   title: string;
   description: string;
@@ -18,12 +25,12 @@ const fieldGroups: Array<{
 }> = [
   {
     title: "費率設定",
-    description: "建立訂單、提案與投票每票要支付的固定費率。",
+    description: "建立訂單、提案、投票與訂閱費用都以 ETH 顯示與輸入。",
     fields: [
-      { key: "createFeeWei", label: "建立訂單費 (必填)", help: "建立一筆訂單 round 的固定費。" },
-      { key: "proposalFeeWei", label: "提案費 (必填)", help: "每提一間店要支付的固定費率。" },
-      { key: "voteFeeWei", label: "投票費 (必填)", help: "每 1 票對應的固定費率。" },
-      { key: "subscriptionFeeWei", label: "訂閱月費 (必填)", help: "每次月訂閱要支付的鏈上費用。" }
+      { key: "createFeeWei", label: "建立訂單費 (必填)", help: "建立一筆訂單 round 的固定費，請用 ETH 輸入。" },
+      { key: "proposalFeeWei", label: "提案費 (必填)", help: "每提一間店要支付的固定費率，請用 ETH 輸入。" },
+      { key: "voteFeeWei", label: "投票費 (必填)", help: "每 1 票對應的固定費率，請用 ETH 輸入。" },
+      { key: "subscriptionFeeWei", label: "訂閱月費 (必填)", help: "每次月訂閱要支付的鏈上費用，請用 ETH 輸入。" }
     ]
   },
   {
@@ -62,6 +69,7 @@ const fieldGroups: Array<{
     title: "逾時設定",
     description: "店家、會員與 claim timeout 等逾時規則。",
     fields: [
+      { key: "autoPayoutDelayDays", label: "自動撥款延遲天數 (必填)", help: "會員確認收餐後，延遲幾天於當天 23:59 自動批次撥款。" },
       { key: "merchantAcceptTimeoutMins", label: "店家接單逾時分鐘數 (必填)", help: "超過此時間可進入逾時處理。" },
       { key: "merchantCompleteTimeoutMins", label: "店家完成逾時分鐘數 (必填)", help: "店家已接單後最晚應完成的時間。" },
       { key: "memberConfirmTimeoutMins", label: "會員確認逾時分鐘數 (必填)", help: "超過後可自動視為已完成。" },
@@ -80,6 +88,7 @@ const fieldGroups: Array<{
 
 export function AdminGovernanceSettings() {
   const [params, setParams] = useState<GovernanceParams | null>(null);
+  const [feeText, setFeeText] = useState<Record<string, string>>({});
   const [durationOptionText, setDurationOptionText] = useState({
     proposal: "",
     vote: "",
@@ -93,6 +102,7 @@ export function AdminGovernanceSettings() {
     fetchGovernanceParams()
       .then((next) => {
         setParams(next);
+        setFeeText(buildFeeText(next));
         setDurationOptionText({
           proposal: (next.proposalDurationOptions || [next.proposalDurationMinutes]).join(", "),
           vote: (next.voteDurationOptions || [next.voteDurationMinutes]).join(", "),
@@ -114,6 +124,18 @@ export function AdminGovernanceSettings() {
   );
 
   function updateField(key: NumericGovernanceKey, value: string) {
+    if (feeKeys.has(key)) {
+      const fieldKey = key as string;
+      setFeeText((current) => ({ ...current, [fieldKey]: value }));
+      setParams((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          [fieldKey]: parseEthToWeiNumber(value)
+        } as GovernanceParams;
+      });
+      return;
+    }
     setParams((current) => {
       if (!current) return current;
       const next = Number(value);
@@ -175,6 +197,7 @@ export function AdminGovernanceSettings() {
         orderingDurationOptions: parseOptionText(durationOptionText.ordering, params.orderingDurationMinutes)
       });
       setParams(next);
+      setFeeText(buildFeeText(next));
       setDurationOptionText({
         proposal: (next.proposalDurationOptions || [next.proposalDurationMinutes]).join(", "),
         vote: (next.voteDurationOptions || [next.voteDurationMinutes]).join(", "),
@@ -213,53 +236,59 @@ export function AdminGovernanceSettings() {
           <p className="mt-3 text-sm leading-7 text-muted-foreground">{group.description}</p>
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             {group.fields.map((field) => (
-              <label key={field.key} className="grid gap-2 text-sm">
-                <span className="font-semibold text-foreground">{field.label}</span>
-                <input
-                  type="number"
-                  min={0}
-                  className="meal-field"
-                  value={Number(params[field.key as keyof GovernanceParams] ?? 0)}
-                  onChange={(event) => updateField(field.key, event.target.value)}
-                  placeholder={field.label}
-                />
-                <span className="text-xs leading-6 text-muted-foreground">{field.help}</span>
-                {(() => {
-                  const durationConfig = getDurationStageConfig(field.key);
-                  if (!durationConfig) return null;
-                  return (
-                    <div className="mt-2 rounded-[1rem] border border-border/70 bg-secondary/30 p-3">
-                      <p className="text-xs font-semibold text-foreground">前端可選時間</p>
-                      <p className="mt-1 text-xs leading-6 text-muted-foreground">
-                        目前已設定 {durationConfig.options.length} 種選項。可直接在下方輸入多個分鐘數，或點擊既有選項移除。
-                      </p>
-                      <input
-                        className="meal-field mt-3"
-                        value={durationConfig.text}
-                        onChange={(event) =>
-                          setDurationOptionText((current) => ({
-                            ...current,
-                            [durationConfig.stage]: event.target.value
-                          }))
-                        }
-                        placeholder="1, 10, 20, 30"
-                      />
-                      <div className="mt-3 flex flex-wrap gap-2">
-                        {durationConfig.options.map((item) => (
-                          <button
-                            key={`${durationConfig.stage}-${item}`}
-                            type="button"
-                            className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-foreground transition hover:border-destructive hover:text-destructive"
-                            onClick={() => removeDurationOption(durationConfig.stage, item)}
-                          >
-                            {item} 分鐘 ×
-                          </button>
-                        ))}
+              (() => {
+                const fieldKey = field.key as string;
+                const isFeeField = feeKeys.has(field.key);
+                const durationConfig = getDurationStageConfig(field.key);
+                return (
+                  <label key={field.key} className="grid gap-2 text-sm">
+                    <span className="font-semibold text-foreground">{field.label}</span>
+                    <input
+                      type="text"
+                      inputMode={isFeeField ? "decimal" : "numeric"}
+                      className="meal-field"
+                      value={isFeeField ? feeText[fieldKey] ?? "" : String(Number(params[field.key as keyof GovernanceParams] ?? 0))}
+                      onChange={(event) => updateField(field.key, event.target.value)}
+                      placeholder={isFeeField ? "例如：0.001" : field.label}
+                    />
+                    <span className="text-xs leading-6 text-muted-foreground">
+                      {field.help}
+                      {isFeeField ? ` 目前約 ${formatWeiToEthString(Number(params[field.key as keyof GovernanceParams] ?? 0))} ETH。` : ""}
+                    </span>
+                    {durationConfig ? (
+                      <div className="mt-2 rounded-[1rem] border border-border/70 bg-secondary/30 p-3">
+                        <p className="text-xs font-semibold text-foreground">前端可選時間</p>
+                        <p className="mt-1 text-xs leading-6 text-muted-foreground">
+                          目前已設定 {durationConfig.options.length} 種選項。可直接在下方輸入多個分鐘數，或點擊既有選項移除。
+                        </p>
+                        <input
+                          className="meal-field mt-3"
+                          value={durationConfig.text}
+                          onChange={(event) =>
+                            setDurationOptionText((current) => ({
+                              ...current,
+                              [durationConfig.stage]: event.target.value
+                            }))
+                          }
+                          placeholder="1, 10, 20, 30"
+                        />
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {durationConfig.options.map((item) => (
+                            <button
+                              key={`${durationConfig.stage}-${item}`}
+                              type="button"
+                              className="rounded-full border border-border bg-muted px-3 py-1 text-xs font-semibold text-foreground transition hover:border-destructive hover:text-destructive"
+                              onClick={() => removeDurationOption(durationConfig.stage, item)}
+                            >
+                              {item} 分鐘 ×
+                            </button>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })()}
-              </label>
+                    ) : null}
+                  </label>
+                );
+              })()
             ))}
           </div>
         </section>
@@ -273,4 +302,34 @@ export function AdminGovernanceSettings() {
       </div>
     </div>
   );
+}
+
+function buildFeeText(params: GovernanceParams) {
+  return {
+    createFeeWei: formatWeiToEthString(params.createFeeWei),
+    proposalFeeWei: formatWeiToEthString(params.proposalFeeWei),
+    voteFeeWei: formatWeiToEthString(params.voteFeeWei),
+    subscriptionFeeWei: formatWeiToEthString(params.subscriptionFeeWei)
+  };
+}
+
+function formatWeiToEthString(value: number) {
+  const amount = BigInt(value || 0);
+  const integer = amount / 10n ** 18n;
+  const fraction = amount % 10n ** 18n;
+  const fractionText = fraction.toString().padStart(18, "0").replace(/0+$/, "");
+  return fractionText ? `${integer}.${fractionText}` : integer.toString();
+}
+
+function parseEthToWeiNumber(input: string) {
+  const trimmed = input.trim();
+  if (!trimmed) return 0;
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) return 0;
+  const [whole, decimal = ""] = trimmed.split(".");
+  const normalized = `${whole}.${decimal}`.replace(/\.$/, "");
+  const [normalizedWhole, normalizedDecimal = ""] = normalized.split(".");
+  const wei =
+    BigInt(normalizedWhole || "0") * 10n ** 18n +
+    BigInt((normalizedDecimal + "0".repeat(18)).slice(0, 18) || "0");
+  return Number(wei);
 }

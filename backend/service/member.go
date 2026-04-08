@@ -230,10 +230,10 @@ func (s *MemberService) VerifyWalletAuth(wallet, signature, displayName, inviteC
 			if inviter.ID == memberID {
 				return nil, "", false, false, ErrSelfRegistrationInviteCode
 			}
-			if rewardErr := s.repo.AddClaimableTickets(inviter.ID, 1); rewardErr != nil {
+			if rewardErr := s.repo.AddTickets(inviter.ID, 1); rewardErr != nil {
 				return nil, "", false, false, rewardErr
 			}
-			if rewardErr := s.repo.AddClaimableTickets(memberID, 1); rewardErr != nil {
+			if rewardErr := s.repo.AddTickets(memberID, 1); rewardErr != nil {
 				return nil, "", false, false, rewardErr
 			}
 			if usageErr := s.repo.RecordRegistrationInviteUsage(strings.TrimSpace(inviteCode), inviter.ID, memberID); usageErr != nil {

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Minus, Plus, ShoppingBasket, Wallet } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -75,8 +75,39 @@ const defaultCreateDraft: CreateDraft = {
 
 type StageSortKey = "newest" | "oldest" | "title" | "options_desc" | "votes_desc" | "orders_desc" | "deadline_soon";
 
+type PendingOrderingSync =
+  | { action: "create_proposal"; txHash: string; payload: Parameters<typeof createProposal>[0] }
+  | { action: "add_option"; txHash: string; payload: { proposalId: number; merchantId: string; useProposalTicket: boolean } }
+  | { action: "vote"; txHash: string; payload: { proposalId: number; optionId: number; voteCount: number; useVoteTicket: boolean } }
+  | { action: "pay_order"; txHash: string; payload: Parameters<typeof finalizeOrder>[0] };
+
+const ORDERING_SYNC_KEY = "member-ordering-pending-sync";
+
+function readPendingOrderingSync(): PendingOrderingSync | null {
+  if (typeof window === "undefined") return null;
+  const raw = window.sessionStorage.getItem(ORDERING_SYNC_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as PendingOrderingSync;
+  } catch {
+    window.sessionStorage.removeItem(ORDERING_SYNC_KEY);
+    return null;
+  }
+}
+
+function writePendingOrderingSync(value: PendingOrderingSync) {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.setItem(ORDERING_SYNC_KEY, JSON.stringify(value));
+}
+
+function clearPendingOrderingSync() {
+  if (typeof window === "undefined") return;
+  window.sessionStorage.removeItem(ORDERING_SYNC_KEY);
+}
+
 export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; proposalId?: number }) {
   const router = useRouter();
+  const replayedPendingSync = useRef(false);
   const [state, setState] = useState<WorkspaceState>({ member: null, groups: [], proposals: [], merchants: [], contractInfo: null, governanceParams: null });
   const [loading, setLoading] = useState(true);
   const [actionPending, setActionPending] = useState(false);
@@ -141,6 +172,60 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
     return () => window.clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    if (stage !== "voting") return;
+    const timer = window.setInterval(() => {
+      refresh().catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [refresh, stage]);
+
+  useEffect(() => {
+    if (loading || replayedPendingSync.current) return;
+    const pending = readPendingOrderingSync();
+    if (!pending) return;
+    replayedPendingSync.current = true;
+    setActionPending(true);
+    setMessage("偵測到上一筆付款已送出，正在補回同步結果...");
+    (async () => {
+      try {
+        if (pending.action === "create_proposal") {
+          await createProposal({ ...pending.payload, txHash: pending.txHash });
+          clearPendingOrderingSync();
+          if (typeof window !== "undefined") {
+            window.sessionStorage.setItem("member-ordering-flash", `已成功建立訂單「${pending.payload.title}」。`);
+            window.location.assign("/member/ongoing-orders");
+            return;
+          }
+          router.push("/member/ongoing-orders");
+          return;
+        }
+        if (pending.action === "add_option") {
+          await addProposalOption(pending.payload.proposalId, pending.payload.merchantId, pending.payload.useProposalTicket, pending.txHash);
+          clearPendingOrderingSync();
+          await refresh();
+          setMessage("上一筆提案付款已成功補回同步。");
+          return;
+        }
+        if (pending.action === "vote") {
+          await voteProposal(pending.payload.proposalId, pending.payload.optionId, pending.payload.voteCount, pending.payload.useVoteTicket, pending.txHash);
+          clearPendingOrderingSync();
+          await refresh();
+          setMessage("上一筆投票付款已成功補回同步。");
+          return;
+        }
+        await finalizeOrder({ ...pending.payload, txHash: pending.txHash });
+        clearPendingOrderingSync();
+        await refresh();
+        setMessage("上一筆點餐付款已成功補回同步。");
+      } catch {
+        setMessage("上一筆付款已送出，但同步仍在處理中。請稍後重新整理確認結果，暫時不要重複付款。");
+      } finally {
+        setActionPending(false);
+      }
+    })();
+  }, [loading, refresh, router]);
 
   useEffect(() => {
     const targetMerchantIds = new Set<string>();
@@ -210,6 +295,8 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     }
     setActionPending(true);
     setMessage("");
+    let paymentSubmitted = false;
+    let syncTxHash = "";
     try {
       const initialProposalTicketFlags =
         useInitialProposalTickets && (state.member?.proposalCouponCount || 0) > 0
@@ -229,6 +316,24 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           state.contractInfo!.platformTreasury as `0x${string}`,
           txValueWei
         );
+        paymentSubmitted = true;
+        syncTxHash = chainTxHash;
+        writePendingOrderingSync({
+          action: "create_proposal",
+          txHash: chainTxHash,
+          payload: {
+            title: createDraft.title.trim(),
+            description: "",
+            maxOptions: Number(createDraft.maxOptions),
+            merchantIds: createDraft.merchantIds,
+            useInitialProposalTickets: initialProposalTicketFlags,
+            proposalMinutes: Number(createDraft.proposalMinutes),
+            voteMinutes: Number(createDraft.voteMinutes),
+            orderMinutes: Number(createDraft.orderMinutes),
+            groupId: Number(createDraft.groupId),
+            useCreateOrderTicket
+          }
+        });
         await registerPendingTransaction({
           proposalId: 0,
           action: "create_proposal",
@@ -247,8 +352,9 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
         orderMinutes: Number(createDraft.orderMinutes),
         groupId: Number(createDraft.groupId),
         useCreateOrderTicket,
-        chainProposalId: undefined
+        txHash: syncTxHash || undefined
       });
+      clearPendingOrderingSync();
       setCreateDraft((current) => ({ ...defaultCreateDraft, groupId: current.groupId }));
       setCreateMerchantQuery("");
       setUseCreateOrderTicket(false);
@@ -260,7 +366,11 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       }
       router.push("/member/ongoing-orders");
     } catch (error) {
-      setMessage(toFriendlyWalletError(error, "建立訂單付款未成功，請重新操作。"));
+      setMessage(
+        paymentSubmitted
+          ? "付款已送出，但建立訂單同步失敗。請先到成立中訂單確認是否已建立，若仍未出現再重新整理後操作。"
+          : toFriendlyWalletError(error, "建立訂單付款未成功，請重新操作。")
+      );
     } finally {
       setActionPending(false);
     }
@@ -272,14 +382,22 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     if (!merchantId) return;
     setActionPending(true);
     setMessage("");
+    let paymentSubmitted = false;
+    let syncTxHash = "";
     try {
-      let chainOptionIndex: number | undefined;
       if (isUsableContractAddress(state.contractInfo?.platformTreasury)) {
         const value = BigInt(useProposalTicket ? 0 : detail.proposalFeeWei || 0);
         const { hash: txHash, account } = await sendNativePayment(
           state.contractInfo!.platformTreasury as `0x${string}`,
           value
         );
+        paymentSubmitted = true;
+        syncTxHash = txHash;
+        writePendingOrderingSync({
+          action: "add_option",
+          txHash,
+          payload: { proposalId: detail.id, merchantId, useProposalTicket }
+        });
         await registerPendingTransaction({
           proposalId: detail.id,
           action: "add_option",
@@ -287,14 +405,19 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           walletAddress: account
         }).catch(() => undefined);
       }
-      await addProposalOption(detail.id, merchantId, useProposalTicket, chainOptionIndex);
+      await addProposalOption(detail.id, merchantId, useProposalTicket, syncTxHash || undefined);
+      clearPendingOrderingSync();
       setOptionMerchantId("");
       setOptionMerchantQuery("");
       setUseProposalTicket(false);
       await refresh();
       setMessage("已新增提案店家。");
     } catch (error) {
-      setMessage(toFriendlyWalletError(error, "提案付款未成功，請重新操作。"));
+      setMessage(
+        paymentSubmitted
+          ? "付款已送出，但提案同步失敗。請重新整理後確認該店家是否已加入；若未加入，再重新操作。"
+          : toFriendlyWalletError(error, "提案付款未成功，請重新操作。")
+      );
     } finally {
       setActionPending(false);
     }
@@ -337,6 +460,8 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     if (!detail || (!voteTokens.trim() && !useVoteTicket)) return;
     setActionPending(true);
     setMessage("");
+    let paymentSubmitted = false;
+    let syncTxHash = "";
     try {
       const option = detail.options.find((item) => item.id === optionId);
       const voteCount = Number(voteTokens || "0");
@@ -348,6 +473,13 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           state.contractInfo!.platformTreasury as `0x${string}`,
           value
         );
+        paymentSubmitted = true;
+        syncTxHash = txHash;
+        writePendingOrderingSync({
+          action: "vote",
+          txHash,
+          payload: { proposalId: detail.id, optionId, voteCount: Number(voteTokens || "0"), useVoteTicket }
+        });
         await registerPendingTransaction({
           proposalId: detail.id,
           action: "vote",
@@ -355,11 +487,31 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           walletAddress: account
         }).catch(() => undefined);
       }
-      await voteProposal(detail.id, optionId, Number(voteTokens || "0"), useVoteTicket);
-      await refresh();
+      const updatedProposal = await voteProposal(detail.id, optionId, Number(voteTokens || "0"), useVoteTicket, syncTxHash || undefined);
+      clearPendingOrderingSync();
+      setState((current) => ({
+        ...current,
+        proposals: dedupeProposals(
+          safeArray(current.proposals).map((proposal) =>
+            proposal.id === updatedProposal.id ? normalizeProposal(updatedProposal) : proposal
+          )
+        )
+      }));
+      setVoteTokens("");
+      setUseVoteTicket(false);
+      try {
+        await refresh();
+      } catch {
+        setMessage("投票與付款已成功送出，但頁面同步較慢，請重新整理後確認結果。");
+        return;
+      }
       setMessage("已完成投票，付款確認後不可再次修改。");
     } catch (error) {
-      setMessage(toFriendlyWalletError(error, "投票付款未成功，請重新操作。"));
+      setMessage(
+        paymentSubmitted
+          ? "付款已送出，但投票同步失敗。請先重新整理確認票數是否已更新；若未更新，再重新操作。"
+          : toFriendlyWalletError(error, "投票付款未成功，請重新操作。")
+      );
     } finally {
       setActionPending(false);
     }
@@ -392,12 +544,13 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
 
     setActionPending(true);
     setMessage("");
+    let paymentSubmitted = false;
+    let syncTxHash = "";
     try {
       const result = await signOrder(detail.id, payload);
       if (!result.signature) {
         throw new Error("訂單簽章未成功產生，請重新操作。");
       }
-      let escrowOrderId: number | undefined;
       const { account: walletAddress } = await ensureSepoliaClients();
       const requiredBalance = BigInt(result.quote.requiredBalanceWei);
       if (walletAddress) {
@@ -412,6 +565,17 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           state.contractInfo!.platformTreasury as `0x${string}`,
           BigInt(result.quote.subtotalWei)
         );
+        paymentSubmitted = true;
+        syncTxHash = txHash;
+        writePendingOrderingSync({
+          action: "pay_order",
+          txHash,
+          payload: {
+            proposalId: detail.id,
+            items: payload,
+            signature: result.signature
+          }
+        });
         await registerPendingTransaction({
           proposalId: detail.id,
           action: "pay_order",
@@ -424,15 +588,26 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       await finalizeOrder({
         proposalId: detail.id,
         items: payload,
-        escrowOrderId,
-        signature: result.signature
+        signature: result.signature,
+        txHash: syncTxHash || undefined
       });
+      clearPendingOrderingSync();
       setOrderItems({});
-      await refresh();
+      try {
+        await refresh();
+      } catch {
+        setMessage("付款與點餐已送出，但頁面同步較慢，請到完成送出訂單頁確認最新狀態。");
+        router.push(`/member/ordering/submitted/${detail.id}`);
+        return;
+      }
       setMessage("已送出點餐並完成付款。");
       router.push(`/member/ordering/submitted/${detail.id}`);
     } catch (error) {
-      setMessage(toFriendlyWalletError(error, "付款未成功，請重新操作。"));
+      setMessage(
+        paymentSubmitted
+          ? "付款已送出，但點餐同步失敗。請先到完成送出訂單頁確認是否已建立，若未出現再重新整理後操作。"
+          : toFriendlyWalletError(error, "付款未成功，請重新操作。")
+      );
     } finally {
       setActionPending(false);
     }
@@ -791,6 +966,9 @@ function StageDetail(props: {
 }) {
   const { stage, proposal, merchants, merchantMenu, now, actionPending } = props;
   const winner = proposal.options.find((option) => option.id === proposal.winnerOptionId);
+  const hasCurrentMemberVote =
+    stage === "voting" &&
+    (proposal.currentVoteOptionId > 0 || safeArray(proposal.votes).some((vote) => vote.memberId === props.memberId));
   const selectedItems = merchantMenu?.menu.filter((item) => (props.orderItems[item.id] || 0) > 0) || [];
   const selectedPortions = selectedItems.reduce((sum, item) => sum + (props.orderItems[item.id] || 0), 0);
   const selectedSubtotalWei = selectedItems.reduce((total, item) => total + BigInt(item.priceWei) * BigInt(props.orderItems[item.id] || 0), 0n);
@@ -878,6 +1056,7 @@ function StageDetail(props: {
           <section className="meal-panel p-8">
             <p className="meal-kicker">Vote</p>
             <h3 className="text-2xl font-extrabold">投票給店家</h3>
+            <p className="mt-3 text-sm text-muted-foreground">每位成員在這個階段只能投給一間店家；可以自行決定投幾票，但確認付款後就不能再改。</p>
             <div className="mt-6 space-y-4">
               <Field label="這輪要投幾票 (必填)">
                 <div className="flex gap-3">
@@ -887,9 +1066,10 @@ function StageDetail(props: {
                 {props.voteQuoteMessage ? <p className="mt-2 text-xs text-muted-foreground">{props.voteQuoteMessage}</p> : null}
               </Field>
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input type="checkbox" checked={props.useVoteTicket} onChange={(event) => props.setUseVoteTicket(event.target.checked)} />
+                <input type="checkbox" checked={props.useVoteTicket} onChange={(event) => props.setUseVoteTicket(event.target.checked)} disabled={hasCurrentMemberVote || actionPending} />
                 使用投票優惠券。投票優惠券固定換 1 票，確認投票後不可更改。
               </label>
+              {hasCurrentMemberVote ? <p className="text-sm text-[hsl(25_85%_36%)]">你已完成這輪投票，付款確認後不可再次修改。</p> : null}
               {proposal.options.map((option) => (
                 <div key={option.id} className="rounded-[1.2rem] border border-border bg-background/70 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
@@ -897,7 +1077,17 @@ function StageDetail(props: {
                       <p className="font-semibold">{option.merchantName}</p>
                       <p className="mt-1 text-sm text-muted-foreground">目前 {option.weightedVotes} 票</p>
                     </div>
-                    <Button onClick={() => props.onVote(option.id)} disabled={actionPending || (!props.useVoteTicket && !props.voteTokens.trim())}>確認投票這家</Button>
+                    {hasCurrentMemberVote ? (
+                      <span className={`rounded-full px-3 py-2 text-xs font-bold ${
+                        proposal.currentVoteOptionId === option.id
+                          ? "bg-[hsl(25_85%_36%)] text-white"
+                          : "border border-border bg-background text-muted-foreground"
+                      }`}>
+                        {proposal.currentVoteOptionId === option.id ? "已投票" : "未選擇"}
+                      </span>
+                    ) : (
+                      <Button onClick={() => props.onVote(option.id)} disabled={actionPending || (!props.useVoteTicket && !props.voteTokens.trim())}>確認投票這家</Button>
+                    )}
                   </div>
                 </div>
               ))}
@@ -1122,7 +1312,7 @@ function normalizeProposal(proposal: Proposal): Proposal {
 function dedupeProposals(proposals: Proposal[]) {
   const byKey = new Map<string, Proposal>();
   for (const proposal of proposals) {
-    const key = proposal.chainProposalId ? `chain:${proposal.chainProposalId}` : `local:${proposal.id}`;
+    const key = `proposal:${proposal.id}`;
     const existing = byKey.get(key);
     if (!existing) {
       byKey.set(key, proposal);

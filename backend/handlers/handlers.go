@@ -136,6 +136,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /admin/platform-params", s.withAdmin(s.handleAdminGetPlatformParams))
 	mux.HandleFunc("POST /admin/platform-params", s.withAdmin(s.handleAdminUpdatePlatformParams))
 	mux.HandleFunc("POST /admin/orders/{id}/payout", s.withAdmin(s.handleAdminMarkOrderPaid))
+	mux.HandleFunc("POST /admin/orders/payout/batch", s.withAdmin(s.handleAdminBatchMarkOrderPaid))
 	mux.HandleFunc("GET /proposals", s.withSubscribed(s.handleListProposals))
 	mux.HandleFunc("POST /proposals", s.withSubscribed(s.handleCreateProposal))
 	mux.HandleFunc("GET /proposals/{id}", s.withSubscribed(s.handleGetProposal))
@@ -691,18 +692,19 @@ func (s *Server) handleDeleteProposal(w http.ResponseWriter, r *http.Request, me
 
 func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request, memberID int64) {
 	var body struct {
-		Title                     string `json:"title"`
-		Description               string `json:"description"`
-		MaxOptions                int64  `json:"maxOptions"`
-		MerchantID                string `json:"merchantId"`
+		Title                     string   `json:"title"`
+		Description               string   `json:"description"`
+		MaxOptions                int64    `json:"maxOptions"`
+		MerchantID                string   `json:"merchantId"`
 		MerchantIDs               []string `json:"merchantIds"`
-		UseInitialProposalTickets []bool `json:"useInitialProposalTickets"`
-		ProposalMinutes           int64  `json:"proposalMinutes"`
-		VoteMinutes               int64  `json:"voteMinutes"`
-		OrderMinutes              int64  `json:"orderMinutes"`
-		GroupID                   int64  `json:"groupId"`
-		UseCreateOrderTicket      bool `json:"useCreateOrderTicket"`
-		ChainProposalID           int64 `json:"chainProposalId"`
+		UseInitialProposalTickets []bool   `json:"useInitialProposalTickets"`
+		ProposalMinutes           int64    `json:"proposalMinutes"`
+		VoteMinutes               int64    `json:"voteMinutes"`
+		OrderMinutes              int64    `json:"orderMinutes"`
+		GroupID                   int64    `json:"groupId"`
+		UseCreateOrderTicket      bool     `json:"useCreateOrderTicket"`
+		ChainProposalID           int64    `json:"chainProposalId"`
+		TxHash                    string   `json:"txHash"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -711,6 +713,15 @@ func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request, me
 	if body.GroupID <= 0 {
 		writeError(w, http.StatusBadRequest, "join a group first")
 		return
+	}
+	if strings.TrimSpace(body.TxHash) != "" {
+		if pending, pendingErr := s.txRepo.GetPendingTransaction(memberID, strings.TrimSpace(body.TxHash)); pendingErr == nil && pending.Status == "completed" && pending.ProposalID > 0 {
+			proposal, err := s.proposals.Get(pending.ProposalID)
+			if err == nil {
+				writeJSON(w, http.StatusOK, anonymizeProposal(proposal, memberID))
+				return
+			}
+		}
 	}
 	isMember, err := s.groupRepo.IsMember(body.GroupID, memberID)
 	if err != nil {
@@ -783,6 +794,9 @@ func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request, me
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if strings.TrimSpace(body.TxHash) != "" {
+		_, _ = s.txRepo.UpdatePendingTransaction(memberID, strings.TrimSpace(body.TxHash), "completed", proposal.ID, "create_proposal", "", "")
+	}
 	writeJSON(w, http.StatusCreated, anonymizeProposal(proposal, memberID))
 }
 
@@ -804,6 +818,7 @@ func (s *Server) handleAddOption(w http.ResponseWriter, r *http.Request, memberI
 		MerchantID        string `json:"merchantId"`
 		UseProposalTicket bool   `json:"useProposalTicket"`
 		ChainOptionIndex  int64  `json:"chainOptionIndex"`
+		TxHash            string `json:"txHash"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -817,6 +832,23 @@ func (s *Server) handleAddOption(w http.ResponseWriter, r *http.Request, memberI
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if strings.TrimSpace(body.TxHash) != "" {
+		if pending, pendingErr := s.txRepo.GetPendingTransaction(memberID, strings.TrimSpace(body.TxHash)); pendingErr == nil && pending.Status == "completed" {
+			if pending.ProposalID > 0 && pending.RelatedEvent != "" {
+				proposal, err := s.proposals.Get(pending.ProposalID)
+				if err == nil {
+					optionIDText := strings.TrimPrefix(pending.RelatedEvent, "option:")
+					optionID, _ := strconv.ParseInt(optionIDText, 10, 64)
+					for _, option := range proposal.Options {
+						if option.ID == optionID {
+							writeJSON(w, http.StatusOK, anonymizeOption(option))
+							return
+						}
+					}
+				}
+			}
+		}
+	}
 	option, err := s.proposals.AddOption(proposalID, memberID, body.MerchantID, body.UseProposalTicket)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -827,6 +859,9 @@ func (s *Server) handleAddOption(w http.ResponseWriter, r *http.Request, memberI
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+	}
+	if strings.TrimSpace(body.TxHash) != "" {
+		_, _ = s.txRepo.UpdatePendingTransaction(memberID, strings.TrimSpace(body.TxHash), "completed", proposalID, fmt.Sprintf("option:%d", option.ID), "", "")
 	}
 	writeJSON(w, http.StatusCreated, anonymizeOption(option))
 }
@@ -860,9 +895,10 @@ func (s *Server) handleVote(w http.ResponseWriter, r *http.Request, memberID int
 		return
 	}
 	var body struct {
-		OptionID    int64 `json:"optionId"`
-		VoteCount   int64 `json:"voteCount"`
-		UseVoteTicket bool `json:"useVoteTicket"`
+		OptionID      int64  `json:"optionId"`
+		VoteCount     int64  `json:"voteCount"`
+		UseVoteTicket bool   `json:"useVoteTicket"`
+		TxHash        string `json:"txHash"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -879,10 +915,22 @@ func (s *Server) handleVote(w http.ResponseWriter, r *http.Request, memberID int
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if strings.TrimSpace(body.TxHash) != "" {
+		if pending, pendingErr := s.txRepo.GetPendingTransaction(memberID, strings.TrimSpace(body.TxHash)); pendingErr == nil && pending.Status == "completed" && pending.ProposalID > 0 {
+			proposal, err := s.proposals.Get(pending.ProposalID)
+			if err == nil {
+				writeJSON(w, http.StatusOK, anonymizeProposal(proposal, memberID))
+				return
+			}
+		}
+	}
 	proposal, err := s.proposals.Vote(proposalID, memberID, body.OptionID, body.VoteCount, body.UseVoteTicket)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if strings.TrimSpace(body.TxHash) != "" {
+		_, _ = s.txRepo.UpdatePendingTransaction(memberID, strings.TrimSpace(body.TxHash), "completed", proposalID, "vote", "", "")
 	}
 	writeJSON(w, http.StatusOK, anonymizeProposal(proposal, memberID))
 }
@@ -984,10 +1032,11 @@ func (s *Server) handleOrderSign(w http.ResponseWriter, r *http.Request, memberI
 
 func (s *Server) handleFinalizeOrder(w http.ResponseWriter, r *http.Request, memberID int64) {
 	var body struct {
-		ProposalID int64                  `json:"proposalId"`
-		Items      map[string]int64       `json:"items"`
-		EscrowOrderID *int64              `json:"escrowOrderId"`
-		Signature  *models.OrderSignature `json:"signature"`
+		ProposalID    int64                  `json:"proposalId"`
+		Items         map[string]int64       `json:"items"`
+		EscrowOrderID *int64                 `json:"escrowOrderId"`
+		Signature     *models.OrderSignature `json:"signature"`
+		TxHash        string                 `json:"txHash"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -1001,10 +1050,27 @@ func (s *Server) handleFinalizeOrder(w http.ResponseWriter, r *http.Request, mem
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
+	if strings.TrimSpace(body.TxHash) != "" {
+		if pending, pendingErr := s.txRepo.GetPendingTransaction(memberID, strings.TrimSpace(body.TxHash)); pendingErr == nil && pending.Status == "completed" && strings.TrimSpace(pending.RelatedOrder) != "" {
+			if orderID, parseErr := strconv.ParseInt(strings.TrimSpace(pending.RelatedOrder), 10, 64); parseErr == nil {
+				if orders, listErr := s.members.ListMemberOrders(memberID); listErr == nil {
+					for _, order := range orders {
+						if order.ID == orderID {
+							writeJSON(w, http.StatusOK, order)
+							return
+						}
+					}
+				}
+			}
+		}
+	}
 	order, err := s.orders.SaveSignedOrder(body.ProposalID, memberID, body.Items, body.Signature, body.EscrowOrderID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if strings.TrimSpace(body.TxHash) != "" {
+		_, _ = s.txRepo.UpdatePendingTransaction(memberID, strings.TrimSpace(body.TxHash), "completed", body.ProposalID, "place_order", strconv.FormatInt(order.ID, 10), "")
 	}
 	writeJSON(w, http.StatusCreated, order)
 }
@@ -1569,6 +1635,15 @@ func (s *Server) handleSubscriptionSync(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	if strings.TrimSpace(body.TxHash) != "" {
+		if pending, pendingErr := s.txRepo.GetPendingTransaction(memberID, strings.TrimSpace(body.TxHash)); pendingErr == nil && pending.Status == "completed" {
+			member, err := s.members.GetByID(memberID)
+			if err == nil {
+				writeJSON(w, http.StatusOK, member)
+				return
+			}
+		}
+	}
 	var expiresAt time.Time
 	var err error
 	if strings.TrimSpace(body.ExpiresAt) != "" {
@@ -1602,6 +1677,9 @@ func (s *Server) handleSubscriptionSync(w http.ResponseWriter, r *http.Request, 
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
+	}
+	if strings.TrimSpace(body.TxHash) != "" {
+		_, _ = s.txRepo.UpdatePendingTransaction(memberID, strings.TrimSpace(body.TxHash), "completed", 0, "subscribe", "", "")
 	}
 	writeJSON(w, http.StatusOK, member)
 }

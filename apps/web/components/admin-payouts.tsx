@@ -3,21 +3,24 @@
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { fetchAdminDashboard, fetchContractInfo, markAdminOrderPaid, updatePlatformTreasury, type AdminDashboard, type ContractInfo } from "@/lib/api";
-import { ensureSepoliaClients, isUsableContractAddress, toFriendlyWalletError } from "@/lib/chain";
+import { fetchAdminDashboard, markAdminOrderPaid, markAdminOrdersPaid, updateGovernanceParams, updatePlatformTreasury, type AdminDashboard } from "@/lib/api";
 import { connectWallet } from "@/lib/wallet-auth";
 
 export function AdminPayouts() {
   const [data, setData] = useState<AdminDashboard | null>(null);
-  const [contractInfo, setContractInfo] = useState<ContractInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
+  const [selectedOrderIds, setSelectedOrderIds] = useState<number[]>([]);
+  const [autoPayoutEnabled, setAutoPayoutEnabled] = useState(false);
+  const [autoPayoutDelayDays, setAutoPayoutDelayDays] = useState("2");
 
   async function refresh() {
-    const [dashboard, contract] = await Promise.all([fetchAdminDashboard(), fetchContractInfo().catch(() => null)]);
+    const dashboard = await fetchAdminDashboard();
     setData(dashboard);
-    setContractInfo(contract);
+    setAutoPayoutEnabled(Boolean(dashboard.governanceParams?.autoPayoutEnabled));
+    setAutoPayoutDelayDays(String(dashboard.governanceParams?.autoPayoutDelayDays ?? 2));
+    setSelectedOrderIds((current) => current.filter((orderId) => dashboard.readyPayoutOrders.some((order) => order.orderId === orderId)));
   }
 
   useEffect(() => {
@@ -41,38 +44,68 @@ export function AdminPayouts() {
     }
   }
 
-  async function handleReleasePayout(orderId: number, escrowOrderId?: number) {
-    if (!data?.platformTreasury || !isUsableContractAddress(data.platformTreasury)) {
-      setMessage("請先設定可用的平台中心錢包。");
-      return;
+  async function handleSaveAutoPayout() {
+    if (!data?.governanceParams) return;
+    setPending(true);
+    setMessage("");
+    try {
+      const delay = Math.max(0, Math.trunc(Number(autoPayoutDelayDays) || 0));
+      await updateGovernanceParams({
+        ...data.governanceParams,
+        autoPayoutEnabled,
+        autoPayoutDelayDays: delay
+      });
+      await refresh();
+      setMessage("自動撥款設定已更新。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "自動撥款設定更新失敗");
+    } finally {
+      setPending(false);
     }
-    const order = data?.readyPayoutOrders.find((item) => item.orderId === orderId);
-    if (!order?.merchantPayoutAddress || !isUsableContractAddress(order.merchantPayoutAddress)) {
-      setMessage("找不到可用的店家收款錢包。");
+  }
+
+  async function handleReleasePayout(orderId: number) {
+    setPending(true);
+    setMessage("");
+    try {
+      await markAdminOrderPaid(orderId);
+      await refresh();
+      setMessage("已完成手動撥款，該訂單會從待撥款清單移除。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "手動撥款失敗");
+    } finally {
+      setPending(false);
+    }
+  }
+
+  async function handleBatchReleasePayout() {
+    if (!selectedOrderIds.length) {
+      setMessage("請先勾選至少一筆待撥款訂單。");
       return;
     }
     setPending(true);
     setMessage("");
     try {
-      const { walletClient, publicClient, account: walletAddress } = await ensureSepoliaClients();
-      if (walletAddress.toLowerCase() !== data.platformTreasury.toLowerCase()) {
-        throw new Error("目前連結的 MetaMask 不是已綁定的平台中心錢包。");
-      }
-      const txHash = await walletClient.sendTransaction({
-        account: walletAddress,
-        chain: walletClient.chain,
-        to: order.merchantPayoutAddress as `0x${string}`,
-        value: BigInt(order.amountWei)
-      });
-      await publicClient.waitForTransactionReceipt({ hash: txHash });
-      await markAdminOrderPaid(orderId);
+      const result = await markAdminOrdersPaid(selectedOrderIds);
       await refresh();
-      setMessage("已完成鏈上轉帳並更新本地撥款狀態。");
+      setSelectedOrderIds([]);
+      setMessage(`已完成 ${result.count} 筆批次手動撥款。`);
     } catch (error) {
-      setMessage(toFriendlyWalletError(error, "平台撥款未成功，請重新操作。"));
+      setMessage(error instanceof Error ? error.message : "批次手動撥款失敗");
     } finally {
       setPending(false);
     }
+  }
+
+  function toggleOrderSelection(orderId: number, checked: boolean) {
+    setSelectedOrderIds((current) =>
+      checked ? Array.from(new Set([...current, orderId])) : current.filter((item) => item !== orderId)
+    );
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    if (!data) return;
+    setSelectedOrderIds(checked ? data.readyPayoutOrders.map((order) => order.orderId) : []);
   }
 
   if (loading) {
@@ -105,24 +138,77 @@ export function AdminPayouts() {
       </section>
 
       <section className="meal-panel p-8">
+        <h2 className="text-2xl font-extrabold">自動撥款設定</h2>
+        <p className="mt-3 text-sm leading-7 text-muted-foreground">
+          會員確認收餐後，訂單會先進入待撥款清單；如果啟用自動撥款，系統會在延遲天數到期當天的 23:59 自動批次處理。
+        </p>
+        <div className="mt-6 grid gap-4 md:grid-cols-[auto_1fr_auto] md:items-end">
+          <label className="flex items-center gap-3 rounded-[1rem] border border-border bg-background/70 px-4 py-3 text-sm font-semibold text-foreground">
+            <input
+              type="checkbox"
+              checked={autoPayoutEnabled}
+              onChange={(event) => setAutoPayoutEnabled(event.target.checked)}
+            />
+            啟用自動撥款
+          </label>
+          <label className="grid gap-2 text-sm">
+            <span className="font-semibold text-foreground">自動撥款延遲天數</span>
+            <input
+              type="number"
+              min={0}
+              className="meal-field"
+              value={autoPayoutDelayDays}
+              onChange={(event) => setAutoPayoutDelayDays(event.target.value)}
+            />
+          </label>
+          <Button disabled={pending} onClick={handleSaveAutoPayout}>
+            儲存自動撥款設定
+          </Button>
+        </div>
+      </section>
+
+      <section className="meal-panel p-8">
         <h2 className="text-2xl font-extrabold">待撥款訂單</h2>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[1rem] border border-border bg-background/60 px-4 py-3 text-sm">
+          <label className="flex items-center gap-2 font-semibold text-foreground">
+            <input
+              type="checkbox"
+              checked={Boolean(data.readyPayoutOrders.length) && selectedOrderIds.length === data.readyPayoutOrders.length}
+              onChange={(event) => toggleSelectAll(event.target.checked)}
+            />
+            全選待撥款訂單
+          </label>
+          <Button disabled={pending || selectedOrderIds.length === 0} onClick={handleBatchReleasePayout}>
+            批次手動撥款 {selectedOrderIds.length ? `(${selectedOrderIds.length})` : ""}
+          </Button>
+        </div>
         <div className="mt-6 space-y-4">
           {data.readyPayoutOrders.length === 0 ? <p className="text-sm text-muted-foreground">目前沒有待撥款訂單。</p> : null}
           {data.readyPayoutOrders.map((order) => (
             <div key={order.orderId} className="rounded-[1.4rem] border border-border bg-background/70 p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
+                  <label className="mb-3 flex items-center gap-2 text-sm font-semibold text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={selectedOrderIds.includes(order.orderId)}
+                      onChange={(event) => toggleOrderSelection(order.orderId, event.target.checked)}
+                    />
+                    納入批次手動撥款
+                  </label>
                   <p className="font-bold">{order.title || `訂單 #${order.orderId}`} / {order.merchantName}</p>
                   <p className="mt-2 text-sm text-muted-foreground">{order.memberName} • {new Date(order.createdAt).toLocaleString("zh-TW")}</p>
+                  {order.confirmedAt ? <p className="mt-2 text-sm text-muted-foreground">會員確認時間：{new Date(order.confirmedAt).toLocaleString("zh-TW")}</p> : null}
+                  {order.autoPayoutAt ? <p className="mt-2 text-sm text-[hsl(25_85%_36%)]">自動撥款時間：{new Date(order.autoPayoutAt).toLocaleString("zh-TW")}</p> : null}
                   <p className="mt-2 break-all text-sm text-muted-foreground">店家收款錢包：{order.merchantPayoutAddress}</p>
                 </div>
                 <div className="text-right">
-                  <p className="font-semibold">{order.amountWei} Wei</p>
+                  <p className="font-semibold">{formatWeiToEth(order.amountWei)} ETH</p>
                   <p className="mt-1 text-sm text-muted-foreground">{order.status}</p>
                 </div>
               </div>
-              <Button className="mt-4" disabled={pending} onClick={() => handleReleasePayout(order.orderId, order.escrowOrderId)}>
-                從平台錢包轉帳撥款
+              <Button className="mt-4" disabled={pending} onClick={() => handleReleasePayout(order.orderId)}>
+                手動撥款
               </Button>
             </div>
           ))}
@@ -132,4 +218,12 @@ export function AdminPayouts() {
       {message ? <p className="text-sm text-[hsl(7_65%_42%)]">{message}</p> : null}
     </div>
   );
+}
+
+function formatWeiToEth(value: string | number | bigint) {
+  const amount = BigInt(value || 0);
+  const integer = amount / 10n ** 18n;
+  const fraction = amount % 10n ** 18n;
+  const fractionText = fraction.toString().padStart(18, "0").slice(0, 4).replace(/0+$/, "");
+  return `${integer.toString()}${fractionText ? `.${fractionText}` : ""}`;
 }

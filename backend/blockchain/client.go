@@ -1,6 +1,7 @@
 package blockchain
 
 import (
+	"context"
 	"crypto/ecdsa"
 	"crypto/rand"
 	"errors"
@@ -12,10 +13,13 @@ import (
 	"mealvoting/backend/config"
 	"mealvoting/backend/internal/models"
 
+	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/accounts"
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/ethereum/go-ethereum/ethclient"
 )
 
 type Client struct {
@@ -64,17 +68,80 @@ func NewClient(cfg config.ChainConfig) (*Client, error) {
 
 func (c *Client) ContractInfo() models.ContractInfo {
 	return models.ContractInfo{
-		ChainID:            c.chainID,
-		GovernanceContract: c.governance.Hex(),
+		ChainID:             c.chainID,
+		GovernanceContract:  c.governance.Hex(),
 		OrderEscrowContract: c.contract.Hex(),
-		OrderContract:      c.contract.Hex(),
-		PlatformTreasury:   c.treasury.Hex(),
-		SignerAddress:      c.signer.Hex(),
+		OrderContract:       c.contract.Hex(),
+		PlatformTreasury:    c.treasury.Hex(),
+		SignerAddress:       c.signer.Hex(),
 	}
 }
 
 func (c *Client) NewIndexer() (*Indexer, error) {
 	return NewIndexer(c.rpcURL, c.contract, c.batchSize)
+}
+
+func (c *Client) SendNativeTransfer(ctx context.Context, to string, amountWei string) (string, error) {
+	if strings.TrimSpace(c.rpcURL) == "" {
+		return "", errors.New("rpc url not configured")
+	}
+	if !common.IsHexAddress(strings.TrimSpace(to)) {
+		return "", fmt.Errorf("invalid recipient wallet: %s", to)
+	}
+	amount, ok := new(big.Int).SetString(strings.TrimSpace(amountWei), 10)
+	if !ok {
+		return "", fmt.Errorf("invalid wei amount: %s", amountWei)
+	}
+	client, err := ethclient.DialContext(ctx, c.rpcURL)
+	if err != nil {
+		return "", err
+	}
+	defer client.Close()
+
+	from := c.signer
+	nonce, err := client.PendingNonceAt(ctx, from)
+	if err != nil {
+		return "", err
+	}
+	gasTipCap, err := client.SuggestGasTipCap(ctx)
+	if err != nil {
+		return "", err
+	}
+	head, err := client.HeaderByNumber(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	gasFeeCap := new(big.Int).Add(new(big.Int).Mul(head.BaseFee, big.NewInt(2)), gasTipCap)
+	msg := ethereum.CallMsg{
+		From:      from,
+		To:        ptrAddress(common.HexToAddress(strings.TrimSpace(to))),
+		GasFeeCap: gasFeeCap,
+		GasTipCap: gasTipCap,
+		Value:     amount,
+		Data:      nil,
+	}
+	gasLimit, err := client.EstimateGas(ctx, msg)
+	if err != nil {
+		gasLimit = 21_000
+	}
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID:   big.NewInt(c.chainID),
+		Nonce:     nonce,
+		GasTipCap: gasTipCap,
+		GasFeeCap: gasFeeCap,
+		Gas:       gasLimit,
+		To:        ptrAddress(common.HexToAddress(strings.TrimSpace(to))),
+		Value:     amount,
+		Data:      nil,
+	})
+	signedTx, err := types.SignTx(tx, types.NewLondonSigner(big.NewInt(c.chainID)), c.privateKey)
+	if err != nil {
+		return "", err
+	}
+	if err := client.SendTransaction(ctx, signedTx); err != nil {
+		return "", err
+	}
+	return signedTx.Hash().Hex(), nil
 }
 
 func (c *Client) SignOrder(proposalID int64, memberWallet string, orderHash string, amountWei string) (*models.OrderSignature, error) {
@@ -108,6 +175,10 @@ func (c *Client) SignOrder(proposalID int64, memberWallet string, orderHash stri
 		ContractAddress: c.contract.Hex(),
 		TokenAddress:    common.Address{}.Hex(),
 	}, nil
+}
+
+func ptrAddress(value common.Address) *common.Address {
+	return &value
 }
 
 func (c *Client) digestOrder(proposalID int64, wallet common.Address, orderHash common.Hash, amount *big.Int, expiry int64) (common.Hash, error) {

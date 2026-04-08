@@ -149,6 +149,13 @@ func (m *mockOrderRepo) UpdateMemberOrderStatus(orderID, memberID int64, status 
 func (m *mockOrderRepo) UpdateAdminOrderStatus(orderID int64, status string) (*models.Order, error) {
 	return &models.Order{ID: orderID, Status: status}, nil
 }
+func (m *mockOrderRepo) UpdateAdminOrderStatuses(orderIDs []int64, status string) ([]*models.Order, error) {
+	orders := make([]*models.Order, 0, len(orderIDs))
+	for _, orderID := range orderIDs {
+		orders = append(orders, &models.Order{ID: orderID, Status: status})
+	}
+	return orders, nil
+}
 
 func TestQuoteRejectsWinningMerchantWithoutMenu(t *testing.T) {
 	proposal := &models.Proposal{

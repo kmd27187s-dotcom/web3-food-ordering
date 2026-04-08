@@ -13,6 +13,7 @@ import (
 )
 
 const defaultInactiveGroupPruneInterval = time.Hour
+const defaultAutoPayoutCheckInterval = time.Minute
 
 type inactiveGroupPruner interface {
 	PruneInactiveGroups(ctx context.Context) error
@@ -50,6 +51,10 @@ func NewRuntime(cfg config.Config) (*Runtime, error) {
 func (r *Runtime) StartInactiveGroupPruner(ctx context.Context, logger *log.Logger) {
 	interval := time.Duration(r.Config.InactiveGroups.PruneIntervalMinutes) * time.Minute
 	go RunInactiveGroupPruner(ctx, logger, r.Store, interval)
+}
+
+func (r *Runtime) StartAutoPayoutProcessor(ctx context.Context, logger *log.Logger) {
+	go RunAutoPayoutProcessor(ctx, logger, r.Store, r.Chain, defaultAutoPayoutCheckInterval)
 }
 
 func (r *Runtime) SyncChainOnStart(ctx context.Context, logger *log.Logger) {
@@ -109,6 +114,57 @@ func RunInactiveGroupPruner(ctx context.Context, logger *log.Logger, store inact
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			run()
+		}
+	}
+}
+
+func RunAutoPayoutProcessor(ctx context.Context, logger *log.Logger, store repository.Store, chain *blockchain.Client, interval time.Duration) {
+	if logger == nil {
+		logger = log.Default()
+	}
+	if chain == nil {
+		logger.Printf("auto payout disabled: blockchain client unavailable")
+		return
+	}
+	if interval <= 0 {
+		interval = defaultAutoPayoutCheckInterval
+	}
+
+	run := func() {
+		dashboard, err := store.AdminDashboard()
+		if err != nil {
+			if !errors.Is(ctx.Err(), context.Canceled) {
+				logger.Printf("auto payout dashboard: %v", err)
+			}
+			return
+		}
+		if dashboard == nil || dashboard.GovernanceParams == nil || !dashboard.GovernanceParams.AutoPayoutEnabled {
+			return
+		}
+		now := time.Now().UTC()
+		for _, order := range dashboard.ReadyPayoutOrders {
+			if order == nil || order.AutoPayoutAt == nil || now.Before(order.AutoPayoutAt.UTC()) {
+				continue
+			}
+			if _, err := chain.SendNativeTransfer(ctx, order.MerchantPayoutAddress, order.AmountWei); err != nil {
+				logger.Printf("auto payout order %d transfer failed: %v", order.OrderID, err)
+				continue
+			}
+			if _, err := store.UpdateAdminOrderStatus(order.OrderID, "platform_paid"); err != nil {
+				logger.Printf("auto payout order %d sync failed: %v", order.OrderID, err)
+			}
+		}
+	}
+
+	run()
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():

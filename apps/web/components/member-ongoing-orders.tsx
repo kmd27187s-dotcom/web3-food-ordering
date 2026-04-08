@@ -10,6 +10,7 @@ export function MemberOngoingOrdersView() {
   const [proposals, setProposals] = useState<Proposal[]>([]);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     Promise.all([fetchGroups(), fetchProposals()])
@@ -19,6 +20,23 @@ export function MemberOngoingOrdersView() {
       })
       .catch((error) => setMessage(error instanceof Error ? error.message : "讀取成立中訂單失敗"))
       .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      Promise.all([fetchGroups(), fetchProposals()])
+        .then(([nextGroups, nextProposals]) => {
+          setGroups(nextGroups);
+          setProposals(nextProposals);
+        })
+        .catch(() => null);
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const groupIds = new Set(groups.map((group) => group.id));
@@ -70,6 +88,13 @@ export function MemberOngoingOrdersView() {
                     <div>
                       <p className="font-semibold">{proposal.title}</p>
                       <p className="mt-1 text-sm text-muted-foreground">群組編號：{proposal.groupId} · 提案店家數：{proposal.options.length}</p>
+                      <p className="mt-1 text-sm text-[hsl(25_85%_36%)]">
+                        {section.key === "proposing"
+                          ? `剩餘提案時間：${formatCountdown(proposal.proposalDeadline, now)}`
+                          : section.key === "voting"
+                            ? `剩餘投票時間：${formatCountdown(proposal.voteDeadline, now)}`
+                            : `剩餘點餐時間：${formatCountdown(proposal.orderDeadline, now)}`}
+                      </p>
                     </div>
                     <Link href={`${section.href}/${proposal.id}`} className="rounded-full border border-border px-4 py-2 text-sm font-semibold text-primary">詳細資訊</Link>
                   </div>
@@ -83,4 +108,19 @@ export function MemberOngoingOrdersView() {
       {message ? <p className="text-sm text-primary">{message}</p> : null}
     </div>
   );
+}
+
+function formatCountdown(deadline: string | Date, now: number) {
+  const target = new Date(deadline).getTime();
+  const diff = Math.max(0, target - now);
+  if (!Number.isFinite(target) || diff <= 0) return "已截止";
+  const totalSeconds = Math.floor(diff / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  const hh = String(hours).padStart(2, "0");
+  const mm = String(minutes).padStart(2, "0");
+  const ss = String(seconds).padStart(2, "0");
+  return days > 0 ? `${days} 天 ${hh}:${mm}:${ss}` : `${hh}:${mm}:${ss}`;
 }

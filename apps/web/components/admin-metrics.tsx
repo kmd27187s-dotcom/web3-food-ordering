@@ -313,7 +313,7 @@ export function AdminMetrics() {
                     <p className="mt-2 text-sm text-muted-foreground">共 {order.items.reduce((sum, item) => sum + item.quantity, 0)} 份</p>
                   </div>
                   <div className="text-right text-sm text-muted-foreground">
-                    <p>{order.amountWei} Wei</p>
+                    <p>{formatWeiToEth(order.amountWei)} ETH</p>
                     <p className="mt-1">{order.status}</p>
                   </div>
                 </div>
@@ -337,7 +337,7 @@ export function AdminMetrics() {
                   </div>
                   <div className="text-right text-sm text-muted-foreground">
                     <p>{row.count} 次下單</p>
-                    <p className="mt-1">{row.amountWei.toString()} Wei</p>
+                    <p className="mt-1">{formatWeiToEth(row.amountWei.toString())} ETH</p>
                   </div>
                 </div>
               </div>
@@ -367,4 +367,12 @@ export function AdminMetrics() {
       ) : null}
     </div>
   );
+}
+
+function formatWeiToEth(value: string | number | bigint) {
+  const amount = BigInt(value || 0);
+  const integer = amount / 10n ** 18n;
+  const fraction = amount % 10n ** 18n;
+  const fractionText = fraction.toString().padStart(18, "0").slice(0, 4).replace(/0+$/, "");
+  return `${integer.toString()}${fractionText ? `.${fractionText}` : ""}`;
 }
