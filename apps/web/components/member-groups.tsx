@@ -32,10 +32,7 @@ export function MemberGroups() {
     () => groups.filter((group) => group.ownerMemberId === member?.id),
     [groups, member?.id]
   );
-  const joinedGroups = useMemo(
-    () => groups.filter((group) => !ownedGroups.some((owned) => owned.id === group.id)),
-    [groups, ownedGroups]
-  );
+  const joinedGroups = useMemo(() => groups, [groups]);
 
   async function handleCreateGroup() {
     if (!createName.trim()) return;
@@ -145,9 +142,19 @@ export function MemberGroups() {
           </div>
           <div className="space-y-3">
             <h3 className="text-xl font-bold">我參與的群組</h3>
-            {sortGroups(joinedGroups).length === 0 ? <p className="text-sm text-muted-foreground">目前沒有參與其他人的群組。</p> : null}
+            {sortGroups(joinedGroups).length === 0 ? (
+              <p className="text-sm leading-7 text-muted-foreground">
+                目前沒有加入任何群組。
+                如果你剛切換錢包後重新登入，這通常代表你現在看到的是另一個會員身份。
+              </p>
+            ) : null}
             {sortGroups(joinedGroups).map((group) => (
-              <GroupRow key={group.id} group={group} onCopyInviteCode={handleCopyInviteCode} />
+              <GroupRow
+                key={`joined-${group.id}`}
+                group={group}
+                onCopyInviteCode={handleCopyInviteCode}
+                badgeLabel={group.ownerMemberId === member?.id ? "你建立的群組" : "已加入"}
+              />
             ))}
           </div>
         </div>
@@ -158,12 +165,27 @@ export function MemberGroups() {
   );
 }
 
-function GroupRow({ group, onCopyInviteCode }: { group: Group; onCopyInviteCode: (code: string) => void }) {
+function GroupRow({
+  group,
+  onCopyInviteCode,
+  badgeLabel
+}: {
+  group: Group;
+  onCopyInviteCode: (code: string) => void;
+  badgeLabel?: string;
+}) {
   return (
     <div className="rounded-[1.2rem] border border-border bg-background/70 p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <p className="font-bold">{group.name}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="font-bold">{group.name}</p>
+            {badgeLabel ? (
+              <span className="rounded-full border border-[rgba(220,193,177,0.42)] bg-[rgba(255,255,255,0.72)] px-3 py-1 text-xs font-semibold text-muted-foreground">
+                {badgeLabel}
+              </span>
+            ) : null}
+          </div>
           <p className="mt-2 text-sm text-muted-foreground">建立時間：{new Date(group.createdAt).toLocaleString("zh-TW")}</p>
           <p className="mt-1 text-sm text-muted-foreground">會員人數：{group.members?.length || 0} 人</p>
           <p className="mt-1 text-sm text-muted-foreground">邀請碼：{group.inviteCode || "尚未建立"}</p>
@@ -172,6 +194,9 @@ function GroupRow({ group, onCopyInviteCode }: { group: Group; onCopyInviteCode:
           {group.inviteCode ? (
             <Button variant="ghost" onClick={() => onCopyInviteCode(group.inviteCode || "")}>複製邀請碼</Button>
           ) : null}
+          <Button asChild variant="ghost">
+            <Link href={`/member/groups/${group.id}/members`}>看會員資訊</Link>
+          </Button>
           <Button asChild variant="secondary">
             <Link href={`/member/groups/${group.id}`}>詳細資訊</Link>
           </Button>

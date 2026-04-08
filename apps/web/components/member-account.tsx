@@ -59,6 +59,10 @@ export function MemberAccount() {
         <Stat label="會員錢包" value={member.walletAddress || "尚未綁定"} breakAll />
         <Stat label="積分" value={`${member.points} pts`} />
       </div>
+      <div className="mt-6 rounded-[1.2rem] border border-[rgba(220,193,177,0.38)] bg-[rgba(255,255,255,0.62)] px-4 py-4 text-sm leading-7 text-muted-foreground">
+        如果你直接切換到另一個錢包重新登入，系統會把你當成新的會員身份，原本的群組、訂閱與紀錄不會自動跟過去。
+        若你要延續目前這個會員資料，請先在這裡修改綁定錢包，再用新錢包登入。
+      </div>
       <div className="mt-6 flex flex-wrap gap-3">
         <Button onClick={handleChangeWallet} disabled={pending}>修改錢包位址</Button>
         <Button variant="secondary" onClick={handleUnlinkWallet} disabled={pending || !member.walletAddress}>解除錢包綁定</Button>

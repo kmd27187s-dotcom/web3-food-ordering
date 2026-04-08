@@ -102,6 +102,7 @@ export function LoginPanel() {
         icon={Users}
         title="一般會員"
         description="既有會員可直接登入，新用戶先註冊再進入建立訂單、提案、投票與點餐流程。"
+        identityHint="切換到另一個錢包重新登入時，系統會視為另一個會員身份。若要保留原本群組與訂閱，請先進會員資訊修改綁定錢包。"
         mode={memberMode}
         displayName={memberDisplayName}
         inviteCode={memberInviteCode}
@@ -122,6 +123,7 @@ export function LoginPanel() {
         icon={Store}
         title="店家入口"
         description="店家可用既有會員錢包登入，首次使用先註冊負責人名稱。"
+        identityHint="若你要沿用原本會員資料，請不要直接換錢包首次登入，先到會員資訊修改錢包綁定。"
         mode={merchantMode}
         displayName={merchantDisplayName}
         inviteCode=""
@@ -155,6 +157,7 @@ function WalletRoleCard({
   icon: Icon,
   title,
   description,
+  identityHint,
   mode,
   displayName,
   inviteCode,
@@ -173,6 +176,7 @@ function WalletRoleCard({
   icon: typeof Users;
   title: string;
   description: string;
+  identityHint: string;
   mode: WalletRoleMode;
   displayName: string;
   inviteCode: string;
@@ -201,6 +205,9 @@ function WalletRoleCard({
           <p className="text-sm text-muted-foreground">{description}</p>
         </div>
       </div>
+      <p className="mt-4 rounded-[1.1rem] border border-[rgba(220,193,177,0.32)] bg-[rgba(255,255,255,0.52)] px-4 py-3 text-sm leading-7 text-muted-foreground">
+        {identityHint}
+      </p>
 
       <div className="mt-6 inline-flex rounded-full border border-[rgba(220,193,177,0.42)] bg-[rgba(251,242,237,0.82)] p-1">
         <button

@@ -80,7 +80,17 @@ const fieldGroups: Array<{
 
 export function AdminGovernanceSettings() {
   const [params, setParams] = useState<GovernanceParams | null>(null);
+  const [durationOptions, setDurationOptions] = useState<Record<DurationStage, number[]>>({
+    proposal: [],
+    vote: [],
+    ordering: []
+  });
   const [durationOptionText, setDurationOptionText] = useState({
+    proposal: "",
+    vote: "",
+    ordering: ""
+  });
+  const [durationOptionDraft, setDurationOptionDraft] = useState({
     proposal: "",
     vote: "",
     ordering: ""
@@ -93,10 +103,16 @@ export function AdminGovernanceSettings() {
     fetchGovernanceParams()
       .then((next) => {
         setParams(next);
+        const nextOptions = {
+          proposal: normalizeOptionList(next.proposalDurationOptions, next.proposalDurationMinutes),
+          vote: normalizeOptionList(next.voteDurationOptions, next.voteDurationMinutes),
+          ordering: normalizeOptionList(next.orderingDurationOptions, next.orderingDurationMinutes)
+        };
+        setDurationOptions(nextOptions);
         setDurationOptionText({
-          proposal: (next.proposalDurationOptions || [next.proposalDurationMinutes]).join(", "),
-          vote: (next.voteDurationOptions || [next.voteDurationMinutes]).join(", "),
-          ordering: (next.orderingDurationOptions || [next.orderingDurationMinutes]).join(", ")
+          proposal: nextOptions.proposal.join(", "),
+          vote: nextOptions.vote.join(", "),
+          ordering: nextOptions.ordering.join(", ")
         });
       })
       .catch((error) => setMessage(error instanceof Error ? error.message : "讀取治理參數失敗"))
@@ -106,11 +122,11 @@ export function AdminGovernanceSettings() {
   const fieldCount = useMemo(() => fieldGroups.reduce((sum, group) => sum + group.fields.length, 0), []);
   const currentDurationOptions = useMemo(
     () => ({
-      proposal: parseOptionText(durationOptionText.proposal, params?.proposalDurationMinutes ?? 1),
-      vote: parseOptionText(durationOptionText.vote, params?.voteDurationMinutes ?? 1),
-      ordering: parseOptionText(durationOptionText.ordering, params?.orderingDurationMinutes ?? 1)
+      proposal: normalizeOptionList(durationOptions.proposal, params?.proposalDurationMinutes ?? 1),
+      vote: normalizeOptionList(durationOptions.vote, params?.voteDurationMinutes ?? 1),
+      ordering: normalizeOptionList(durationOptions.ordering, params?.orderingDurationMinutes ?? 1)
     }),
-    [durationOptionText, params]
+    [durationOptions, params]
   );
 
   function updateField(key: NumericGovernanceKey, value: string) {
@@ -125,29 +141,81 @@ export function AdminGovernanceSettings() {
     });
   }
 
+  function normalizeOptionList(values: Array<number | undefined> | undefined, fallback: number) {
+    const normalized = Array.from(
+      new Set(
+        (Array.isArray(values) ? values : [])
+          .map((item) => Number(item))
+          .filter((item) => Number.isFinite(item) && item > 0)
+          .map((item) => Math.trunc(item))
+      )
+    ).sort((a, b) => a - b);
+
+    if (fallback > 0 && !normalized.includes(fallback)) {
+      return [...normalized, Math.trunc(fallback)].sort((a, b) => a - b);
+    }
+    return normalized;
+  }
+
   function parseOptionText(value: string, fallback: number) {
-    const values = value
-      .split(",")
-      .map((item) => Number(item.trim()))
-      .filter((item) => Number.isFinite(item) && item > 0)
-      .map((item) => Math.trunc(item));
-    return Array.from(new Set([fallback, ...values])).sort((a, b) => a - b);
+    return normalizeOptionList(
+      value.split(",").map((item) => Number(item.trim())),
+      fallback
+    );
   }
 
   function removeDurationOption(stage: "proposal" | "vote" | "ordering", minutes: number) {
-    setDurationOptionText((current) => {
-      const fallback =
-        stage === "proposal"
-          ? params?.proposalDurationMinutes ?? 1
-          : stage === "vote"
-            ? params?.voteDurationMinutes ?? 1
-            : params?.orderingDurationMinutes ?? 1;
-      const nextValues = parseOptionText(current[stage], fallback).filter((item) => item !== minutes);
+    setDurationOptions((current) => {
+      const fallback = getDurationFallback(stage);
+      const nextValues = normalizeOptionList(current[stage], fallback).filter((item) => item !== minutes);
+      const normalized = normalizeOptionList(nextValues, fallback);
+      setDurationOptionText((text) => ({ ...text, [stage]: normalized.join(", ") }));
       return {
         ...current,
-        [stage]: nextValues.join(", ")
+        [stage]: normalized
       };
     });
+  }
+
+  function addDurationOption(stage: DurationStage) {
+    const rawValue = durationOptionDraft[stage].trim();
+    const nextValue = Number(rawValue);
+    if (!Number.isFinite(nextValue) || nextValue <= 0) {
+      setMessage("請輸入大於 0 的分鐘數。");
+      return;
+    }
+    const minutes = Math.trunc(nextValue);
+    const fallback = getDurationFallback(stage);
+
+    setDurationOptions((current) => {
+      const nextValues = normalizeOptionList([...current[stage], minutes], fallback);
+      if (normalizeOptionList(current[stage], fallback).join(",") === nextValues.join(",")) {
+        return current;
+      }
+      setDurationOptionText((text) => ({ ...text, [stage]: nextValues.join(", ") }));
+      return {
+        ...current,
+        [stage]: nextValues
+      };
+    });
+    setDurationOptionDraft((current) => ({ ...current, [stage]: "" }));
+    setMessage("");
+  }
+
+  function getDurationFallback(stage: DurationStage) {
+    return stage === "proposal"
+      ? params?.proposalDurationMinutes ?? 1
+      : stage === "vote"
+        ? params?.voteDurationMinutes ?? 1
+        : params?.orderingDurationMinutes ?? 1;
+  }
+
+  function applyDurationOptionText(stage: DurationStage) {
+    const fallback = getDurationFallback(stage);
+    const nextValues = parseOptionText(durationOptionText[stage], fallback);
+    setDurationOptions((current) => ({ ...current, [stage]: nextValues }));
+    setDurationOptionText((current) => ({ ...current, [stage]: nextValues.join(", ") }));
+    setMessage("");
   }
 
   function getDurationStageConfig(key: NumericGovernanceKey): { stage: DurationStage; options: number[]; text: string } | null {
@@ -175,10 +243,16 @@ export function AdminGovernanceSettings() {
         orderingDurationOptions: parseOptionText(durationOptionText.ordering, params.orderingDurationMinutes)
       });
       setParams(next);
+      const nextOptions = {
+        proposal: normalizeOptionList(next.proposalDurationOptions, next.proposalDurationMinutes),
+        vote: normalizeOptionList(next.voteDurationOptions, next.voteDurationMinutes),
+        ordering: normalizeOptionList(next.orderingDurationOptions, next.orderingDurationMinutes)
+      };
+      setDurationOptions(nextOptions);
       setDurationOptionText({
-        proposal: (next.proposalDurationOptions || [next.proposalDurationMinutes]).join(", "),
-        vote: (next.voteDurationOptions || [next.voteDurationMinutes]).join(", "),
-        ordering: (next.orderingDurationOptions || [next.orderingDurationMinutes]).join(", ")
+        proposal: nextOptions.proposal.join(", "),
+        vote: nextOptions.vote.join(", "),
+        ordering: nextOptions.ordering.join(", ")
       });
       setMessage("治理參數已更新，之後新建立的 round 會套用新數值。");
     } catch (error) {
@@ -213,8 +287,8 @@ export function AdminGovernanceSettings() {
           <p className="mt-3 text-sm leading-7 text-muted-foreground">{group.description}</p>
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             {group.fields.map((field) => (
-              <label key={field.key} className="grid gap-2 text-sm">
-                <span className="font-semibold text-foreground">{field.label}</span>
+              <div key={field.key} className="grid gap-2 text-sm">
+                <label className="font-semibold text-foreground">{field.label}</label>
                 <input
                   type="number"
                   min={0}
@@ -231,19 +305,46 @@ export function AdminGovernanceSettings() {
                     <div className="mt-2 rounded-[1rem] border border-border/70 bg-secondary/30 p-3">
                       <p className="text-xs font-semibold text-foreground">前端可選時間</p>
                       <p className="mt-1 text-xs leading-6 text-muted-foreground">
-                        目前已設定 {durationConfig.options.length} 種選項。可直接在下方輸入多個分鐘數，或點擊既有選項移除。
+                        目前已設定 {durationConfig.options.length} 種選項。你可以逐筆新增分鐘數，也可以直接刪除既有選項。
                       </p>
-                      <input
-                        className="meal-field mt-3"
-                        value={durationConfig.text}
-                        onChange={(event) =>
-                          setDurationOptionText((current) => ({
-                            ...current,
-                            [durationConfig.stage]: event.target.value
-                          }))
-                        }
-                        placeholder="1, 10, 20, 30"
-                      />
+                      <div className="mt-3 flex flex-col gap-3 md:flex-row">
+                        <input
+                          type="number"
+                          min={1}
+                          className="meal-field"
+                          value={durationOptionDraft[durationConfig.stage]}
+                          onChange={(event) =>
+                            setDurationOptionDraft((current) => ({
+                              ...current,
+                              [durationConfig.stage]: event.target.value
+                            }))
+                          }
+                          placeholder="輸入分鐘數"
+                        />
+                        <Button type="button" onClick={() => addDurationOption(durationConfig.stage)}>
+                          新增選項
+                        </Button>
+                      </div>
+                      <div className="mt-3 grid gap-2 text-xs text-muted-foreground">
+                        <span className="font-semibold text-foreground">批次編輯分鐘數</span>
+                        <input
+                          className="meal-field"
+                          value={durationConfig.text}
+                          onChange={(event) =>
+                            setDurationOptionText((current) => ({
+                              ...current,
+                              [durationConfig.stage]: event.target.value
+                            }))
+                          }
+                          placeholder="1, 10, 20, 30"
+                        />
+                        <div className="flex flex-wrap gap-2">
+                          <Button type="button" variant="secondary" onClick={() => applyDurationOptionText(durationConfig.stage)}>
+                            套用選項
+                          </Button>
+                        </div>
+                        <span>如需一次整理多個選項，可用逗號分隔輸入。</span>
+                      </div>
                       <div className="mt-3 flex flex-wrap gap-2">
                         {durationConfig.options.map((item) => (
                           <button
@@ -259,7 +360,7 @@ export function AdminGovernanceSettings() {
                     </div>
                   );
                 })()}
-              </label>
+              </div>
             ))}
           </div>
         </section>
