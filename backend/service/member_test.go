@@ -109,19 +109,31 @@ func (m *mockMemberRepo) AddClaimableTickets(memberID, proposalTickets int64) er
 	}
 	return errors.New("member not found")
 }
-func (m *mockMemberRepo) ClaimTickets(memberID int64) (int64, error) {
+func (m *mockMemberRepo) ClaimTickets(memberID int64) (int64, int64, int64, error) {
 	for _, mem := range m.members {
 		if mem.ID == memberID {
 			proposalTickets := mem.ClaimableProposalTickets
 			if proposalTickets == 0 {
-				return 0, errors.New("no claimable tickets")
+				return 0, 0, 0, errors.New("no claimable tickets")
 			}
 			mem.ProposalTicketCount += proposalTickets
 			mem.ClaimableProposalTickets = 0
-			return proposalTickets, nil
+			return proposalTickets, 0, 0, nil
 		}
 	}
-	return 0, errors.New("member not found")
+	return 0, 0, 0, errors.New("member not found")
+}
+func (m *mockMemberRepo) ListRegistrationInviteUsages(memberID int64) ([]*models.RegistrationInviteUsage, error) {
+	return []*models.RegistrationInviteUsage{}, nil
+}
+func (m *mockMemberRepo) RecordRegistrationInviteUsage(inviteCode string, inviterMemberID, usedByMemberID int64) error {
+	return nil
+}
+func (m *mockMemberRepo) ListMemberOrders(memberID int64) ([]*models.Order, error) {
+	return []*models.Order{}, nil
+}
+func (m *mockMemberRepo) MemberReviewCount(memberID int64) (int64, error) {
+	return 0, nil
 }
 func (m *mockMemberRepo) GrantDailyLoginProposalTicket(memberID int64, now time.Time) (bool, error) {
 	for _, mem := range m.members {
