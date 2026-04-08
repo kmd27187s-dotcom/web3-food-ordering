@@ -39,8 +39,20 @@ func newRegistrationInviteCode() (string, error) {
 
 func deriveStatus(proposal *models.Proposal) string {
 	now := time.Now().UTC()
+	if proposal.FailedReason == "cancelled_by_creator" {
+		return "cancelled"
+	}
+	if proposal.RewardsApplied && proposal.TotalVoteCount == 0 && proposal.FailedReason == "no_votes_cast" {
+		return "failed"
+	}
 	switch compareProposalDate(proposal.ProposalDate) {
 	case -1:
+		if proposal.RewardsApplied {
+			if proposal.FailedReason == "no_votes_cast" {
+				return "failed"
+			}
+			return "settled"
+		}
 		return "settled"
 	case 1:
 		return "upcoming"
@@ -105,10 +117,7 @@ func shouldAutoSettleLocalProposal(proposal *models.Proposal) bool {
 	if !isCurrentProposalDay(proposal.ProposalDate) {
 		return false
 	}
-	if proposal.WinnerOptionID == 0 {
-		return false
-	}
-	return !time.Now().UTC().Before(proposal.OrderDeadline)
+	return !time.Now().UTC().Before(proposal.VoteDeadline)
 }
 
 func shouldCountOrderInRoundTotal(status string) bool {

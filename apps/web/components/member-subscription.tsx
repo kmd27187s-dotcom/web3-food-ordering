@@ -58,10 +58,10 @@ export function MemberSubscription() {
       <div className="mt-6 grid gap-4 md:grid-cols-3">
         <Stat label="目前狀態" value={member.subscriptionActive ? "已訂閱" : "尚未訂閱成為會員"} />
         <Stat label="到期時間" value={member.subscriptionExpiresAt ? new Date(member.subscriptionExpiresAt).toLocaleString("zh-TW") : "尚未開通"} />
-        <Stat label="費用" value="99 Token / 30 天" />
+        <Stat label="費用" value="99 平台 Token / 30 天" />
       </div>
       <div className="mt-6 flex flex-wrap gap-3">
-        <Button onClick={handleSubscribe} disabled={pending}>{member.subscriptionActive ? "續訂 99 Token / 30 天" : "立即訂閱"}</Button>
+        <Button onClick={handleSubscribe} disabled={pending}>{member.subscriptionActive ? "續訂 99 平台 Token / 30 天" : "立即訂閱"}</Button>
         <Button variant="secondary" onClick={handleCancelSubscription} disabled={pending || !member.subscriptionActive}>取消訂閱</Button>
       </div>
       {message ? <p className="mt-4 text-sm text-primary">{message}</p> : null}

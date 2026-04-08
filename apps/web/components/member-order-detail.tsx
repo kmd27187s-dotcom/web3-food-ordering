@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { confirmMemberOrder, fetchGroupDetail, fetchMyOrderHistory, type Order } from "@/lib/api";
+import { confirmMemberOrder, fetchContractInfo, fetchGroupDetail, fetchMyOrderHistory, type ContractInfo, type Order } from "@/lib/api";
+import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress } from "@/lib/chain";
 import { OrderDetailPanel } from "@/components/member-order-shared";
 
 type MemberOrderDetailProps =
@@ -12,6 +13,7 @@ type MemberOrderDetailProps =
 
 export function MemberOrderDetailView(props: MemberOrderDetailProps) {
   const [orders, setOrders] = useState<Order[]>([]);
+  const [contractInfo, setContractInfo] = useState<ContractInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
@@ -26,11 +28,13 @@ export function MemberOrderDetailView(props: MemberOrderDetailProps) {
         });
       });
       setOrders(Array.from(dedup.values()));
+      setContractInfo(await fetchContractInfo().catch(() => null));
       return;
     }
 
-    const history = await fetchMyOrderHistory();
+    const [history, contract] = await Promise.all([fetchMyOrderHistory(), fetchContractInfo().catch(() => null)]);
     setOrders(history.orders);
+    setContractInfo(contract);
   }
 
   useEffect(() => {
@@ -45,6 +49,18 @@ export function MemberOrderDetailView(props: MemberOrderDetailProps) {
     if (!order) return;
     setPending(true);
     try {
+      if (order.escrowOrderId && isUsableContractAddress(contractInfo?.orderEscrowContract)) {
+        const { walletClient, publicClient, account } = await ensureSepoliaClients();
+        const txHash = await walletClient.writeContract({
+          address: contractInfo!.orderEscrowContract as `0x${string}`,
+          abi: ESCROW_ABI,
+          functionName: "memberConfirmReceived",
+          args: [BigInt(order.escrowOrderId)],
+          account,
+          chain: walletClient.chain
+        });
+        await publicClient.waitForTransactionReceipt({ hash: txHash });
+      }
       await confirmMemberOrder(order.id);
       await refresh();
       setMessage("已確認接收訂單。");

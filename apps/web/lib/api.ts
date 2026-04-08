@@ -10,11 +10,42 @@ export type Member = {
   proposalTicketCount: number;
   voteTicketCount: number;
   createOrderTicketCount: number;
+  proposalCouponCount: number;
+  voteCouponCount: number;
+  createOrderCouponCount: number;
   claimableProposalTickets: number;
   claimableVoteTickets: number;
   claimableCreateOrderTickets: number;
+  claimableProposalCoupons: number;
+  claimableVoteCoupons: number;
+  claimableCreateOrderCoupons: number;
   subscriptionActive: boolean;
   subscriptionExpiresAt?: string;
+};
+
+export type GovernanceParams = {
+  createFeeWei: number;
+  proposalFeeWei: number;
+  voteFeeWei: number;
+  winnerProposalRefundBps: number;
+  loserProposalRefundBps: number;
+  voteRefundBps: number;
+  winnerBonusBps: number;
+  loserBonusBps: number;
+  winnerProposalPoints: number;
+  winnerVotePointsPerVote: number;
+  proposalDurationMinutes: number;
+  voteDurationMinutes: number;
+  orderingDurationMinutes: number;
+  dailyCreateCouponCount: number;
+  dailyProposalCouponCount: number;
+  dailyVoteCouponCount: number;
+  platformEscrowFeeBps: number;
+  merchantAcceptTimeoutMins: number;
+  merchantCompleteTimeoutMins: number;
+  memberConfirmTimeoutMins: number;
+  governanceClaimTimeoutMins: number;
+  escrowClaimTimeoutMins: number;
 };
 
 export type GroupMember = {
@@ -125,11 +156,20 @@ export type MerchantDetail = {
 
 export type ProposalOption = {
   id: number;
+  chainOptionIndex?: number | null;
   merchantId: string;
   merchantName: string;
   proposerMemberId: number;
   weightedVotes: number;
   tokenStake: number;
+  proposalFeePaidWei?: number;
+  voteFeeCollectedWei?: number;
+  voteRefundWei?: number;
+  proposerRefundWei?: number;
+  proposerRewardWei?: number;
+  firstProposedAt?: string;
+  isWinner?: boolean;
+  usedProposalCoupon?: boolean;
 };
 
 export type OrderItem = {
@@ -142,6 +182,7 @@ export type OrderItem = {
 export type Order = {
   id: number;
   proposalId: number;
+  escrowOrderId?: number;
   title?: string;
   memberId: number;
   memberName: string;
@@ -177,6 +218,22 @@ export type Proposal = {
   orderDeadline: string;
   status: string;
   winnerOptionId: number;
+  totalVoteCount?: number;
+  createFeeWei?: number;
+  createFeeRefundWei?: number;
+  createFeePlatformWei?: number;
+  proposalFeeWei?: number;
+  voteFeeWei?: number;
+  winnerProposalRefundBps?: number;
+  loserProposalRefundBps?: number;
+  voteRefundBps?: number;
+  winnerBonusBps?: number;
+  loserBonusBps?: number;
+  winnerProposalPoints?: number;
+  winnerVotePointsPerVote?: number;
+  usedCreateOrderCoupon?: boolean;
+  settledAt?: string;
+  failedReason?: string;
   orderTotalWei: string;
   orderMemberCount: number;
   currentVoteOptionId: number;
@@ -192,14 +249,21 @@ export type VoteRecord = {
   memberName: string;
   optionId: number;
   tokenAmount: number;
+  feeAmountWei?: number;
   voteWeight: number;
+  voteCount?: number;
+  refundWei?: number;
   submittedAt: string;
   walletHidden?: boolean;
+  useVoteCoupon?: boolean;
 };
 
 export type VoteQuote = {
-  tokenAmount: number;
+  voteCount: number;
   voteWeight: number;
+  feeAmountWei?: number;
+  voteFeeWei?: number;
+  discountedVotes?: number;
 };
 
 export type OrderQuote = {
@@ -228,6 +292,8 @@ export type OrderSignResponse = {
 
 export type ContractInfo = {
   chainId: number;
+  governanceContract: string;
+  orderEscrowContract: string;
   orderContract: string;
   tokenContract: string;
   platformTreasury: string;
@@ -308,6 +374,8 @@ export type MerchantDelistRequest = {
 export type ReadyPayoutOrder = {
   orderId: number;
   proposalId: number;
+  escrowOrderId?: number;
+  title: string;
   memberName: string;
   merchantId: string;
   merchantName: string;
@@ -327,6 +395,7 @@ export type AdminDashboard = {
   pendingMenuReviews: number;
   pendingMerchantDelists: number;
   platformTreasury: string;
+  governanceParams?: GovernanceParams;
   menuChangeRequests: MenuChangeRequest[];
   merchantDelistRequests: MerchantDelistRequest[];
   readyPayoutOrders: ReadyPayoutOrder[];
@@ -507,11 +576,14 @@ export async function createProposal(payload: {
   description?: string;
   maxOptions: number;
   merchantId?: string;
+  merchantIds?: string[];
+  useInitialProposalTickets?: boolean[];
   proposalMinutes: number;
   voteMinutes: number;
   orderMinutes: number;
   groupId: number;
   useCreateOrderTicket?: boolean;
+  chainProposalId?: number;
 }) {
   return apiRequest<Proposal>("/proposals", {
     method: "POST",
@@ -527,27 +599,27 @@ export async function deleteProposal(proposalId: number) {
   });
 }
 
-export async function addProposalOption(proposalId: number, merchantId: string, useProposalTicket = false) {
+export async function addProposalOption(proposalId: number, merchantId: string, useProposalTicket = false, chainOptionIndex?: number) {
   return apiRequest<ProposalOption>(`/proposals/${proposalId}/options`, {
     method: "POST",
     auth: true,
-    body: JSON.stringify({ merchantId, useProposalTicket })
+    body: JSON.stringify({ merchantId, useProposalTicket, chainOptionIndex })
   });
 }
 
-export async function quoteVote(proposalId: number, tokenAmount: number) {
+export async function quoteVote(proposalId: number, voteCount: number, useVoteTicket = false) {
   return apiRequest<VoteQuote>(`/proposals/${proposalId}/votes/quote`, {
     method: "POST",
     auth: true,
-    body: JSON.stringify({ tokenAmount })
+    body: JSON.stringify({ voteCount, useVoteTicket })
   });
 }
 
-export async function voteProposal(proposalId: number, optionId: number, tokenAmount: number, useVoteTicket = false) {
+export async function voteProposal(proposalId: number, optionId: number, voteCount: number, useVoteTicket = false) {
   return apiRequest<Proposal>(`/proposals/${proposalId}/votes`, {
     method: "POST",
     auth: true,
-    body: JSON.stringify({ optionId, tokenAmount, useVoteTicket })
+    body: JSON.stringify({ optionId, voteCount, useVoteTicket })
   });
 }
 
@@ -575,6 +647,7 @@ export async function signOrder(proposalId: number, items: Record<string, number
 export async function finalizeOrder(payload: {
   proposalId: number;
   items: Record<string, number>;
+  escrowOrderId?: number;
   signature?: OrderSignResponse["signature"];
 }) {
   return apiRequest<Order>("/orders/finalize", {
@@ -949,5 +1022,21 @@ export async function updatePlatformTreasury(address: string) {
     method: "POST",
     auth: true,
     body: JSON.stringify({ address })
+  });
+}
+
+export async function fetchGovernanceParams() {
+  return apiRequest<GovernanceParams>("/admin/platform-params", { auth: true });
+}
+
+export async function fetchPublicGovernanceParams() {
+  return apiRequest<GovernanceParams>("/governance/params");
+}
+
+export async function updateGovernanceParams(params: GovernanceParams) {
+  return apiRequest<GovernanceParams>("/admin/platform-params", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify(params)
   });
 }

@@ -51,7 +51,7 @@ export function AdminGroupDetailView({ groupId }: { groupId: number }) {
                 </div>
                 <div className="text-right text-sm text-muted-foreground">
                   <p>積分 {member.points}</p>
-                  <p className="mt-1">Token {member.tokenBalance}</p>
+                  <p className="mt-1">平台 Token {member.tokenBalance}</p>
                 </div>
               </div>
               <div className="mt-4 grid gap-3 md:grid-cols-4">

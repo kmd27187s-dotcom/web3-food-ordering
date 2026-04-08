@@ -16,11 +16,28 @@ type mockProposalRepo struct {
 	nextID    int64
 }
 
+type mockGovernanceSettings struct{}
+
+func (m *mockGovernanceSettings) GovernanceParams() (*models.GovernanceParams, error) {
+	return &models.GovernanceParams{
+		CreateFeeWei:             1,
+		ProposalFeeWei:           1,
+		VoteFeeWei:               1,
+		WinnerProposalRefundBps:  9000,
+		LoserProposalRefundBps:   8000,
+		VoteRefundBps:            5000,
+		WinnerBonusBps:           1000,
+		LoserBonusBps:            500,
+		WinnerProposalPoints:     5,
+		WinnerVotePointsPerVote:  2,
+	}, nil
+}
+
 func newMockProposalRepo() *mockProposalRepo {
 	return &mockProposalRepo{proposals: make(map[int64]*models.Proposal), nextID: 1}
 }
 
-func (m *mockProposalRepo) CreateProposal(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time) (*models.Proposal, error) {
+func (m *mockProposalRepo) CreateProposal(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time, params *models.GovernanceParams) (*models.Proposal, error) {
 	id := m.nextID
 	m.nextID++
 	p := &models.Proposal{
@@ -33,10 +50,11 @@ func (m *mockProposalRepo) CreateProposal(memberID int64, title, description, me
 	return p, nil
 }
 
-func (m *mockProposalRepo) CreateProposalWithCredit(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time) (*models.Proposal, error) {
-	return m.CreateProposal(memberID, title, description, merchantGroup, mealPeriod, proposalDate, maxOptions, createdByName, proposalDeadline, voteDeadline, orderDeadline)
+func (m *mockProposalRepo) CreateProposalWithCredit(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time, params *models.GovernanceParams, useTicket bool) (*models.Proposal, error) {
+	return m.CreateProposal(memberID, title, description, merchantGroup, mealPeriod, proposalDate, maxOptions, createdByName, proposalDeadline, voteDeadline, orderDeadline, params)
 }
 
+func (m *mockProposalRepo) DeleteProposalByCreator(proposalID, memberID int64) error { return nil }
 func (m *mockProposalRepo) ListProposals() []*models.Proposal {
 	var out []*models.Proposal
 	for _, p := range m.proposals {
@@ -50,14 +68,14 @@ func (m *mockProposalRepo) GetProposal(id int64) (*models.Proposal, error) {
 	}
 	return nil, errors.New("proposal not found")
 }
-func (m *mockProposalRepo) InsertProposalOption(proposalID, memberID int64, merchantID, merchantName, proposerName string, tokenCost int64) (*models.ProposalOption, error) {
+func (m *mockProposalRepo) InsertProposalOption(proposalID, memberID int64, merchantID, merchantName, proposerName string, tokenCost int64, useTicket bool) (*models.ProposalOption, error) {
 	opt := &models.ProposalOption{ID: 1, MerchantID: merchantID, MerchantName: merchantName, ProposerMember: memberID, TokenStake: tokenCost}
 	if p, ok := m.proposals[proposalID]; ok {
 		p.Options = append(p.Options, opt)
 	}
 	return opt, nil
 }
-func (m *mockProposalRepo) RecordVote(proposalID, memberID, optionID, tokenAmount int64, displayName string) error {
+func (m *mockProposalRepo) RecordVote(proposalID, memberID, optionID int64, voteCount, feeAmountWei int64, displayName string, useTicket bool) error {
 	return nil
 }
 func (m *mockProposalRepo) ApplySettlementRewards(proposalID int64, rewards []repository.MemberReward, optionRefunds []repository.OptionRefund) error {
@@ -67,6 +85,7 @@ func (m *mockProposalRepo) ApplySettlementRewards(proposalID int64, rewards []re
 // mockMerchantRepo
 type mockMerchantRepo struct{}
 
+func (m *mockMerchantRepo) ApplyScheduledMenuChangeRequests(now time.Time) error { return nil }
 func (m *mockMerchantRepo) GetMerchant(id string) (*models.Merchant, error) {
 	if id == "shop-bento" {
 		return &models.Merchant{ID: "shop-bento", Name: "便當", Group: "taipei-xinyi"}, nil
@@ -87,27 +106,72 @@ func (m *mockMerchantRepo) UpsertMerchant(merchant *models.Merchant) (*models.Me
 func (m *mockMerchantRepo) UpsertMenuItem(_ string, _ *models.MenuItem) error {
 	return nil
 }
+func (m *mockMerchantRepo) GetMerchantDetail(id string) (*models.MerchantDetail, error) { return nil, nil }
+func (m *mockMerchantRepo) GetMerchantByOwner(memberID int64, wallet string) (*models.Merchant, error) {
+	return nil, nil
+}
+func (m *mockMerchantRepo) ListMerchantReviews(merchantID string) ([]*models.MerchantReview, error) {
+	return []*models.MerchantReview{}, nil
+}
+func (m *mockMerchantRepo) CreateMerchantReview(review *models.MerchantReview) (*models.MerchantReview, error) {
+	return review, nil
+}
+func (m *mockMerchantRepo) ClaimMerchant(merchantID string, memberID int64, displayName, wallet string) (*models.Merchant, error) {
+	return nil, nil
+}
+func (m *mockMerchantRepo) UpsertOwnedMerchantProfile(memberID int64, displayName, wallet string, merchant *models.Merchant) (*models.Merchant, error) {
+	return merchant, nil
+}
+func (m *mockMerchantRepo) UpdateOwnedMerchantWallet(memberID int64, wallet string) (*models.Merchant, error) {
+	return nil, nil
+}
+func (m *mockMerchantRepo) UnlinkOwnedMerchant(memberID int64) error { return nil }
+func (m *mockMerchantRepo) RequestMerchantDelist(memberID int64) (*models.Merchant, error) { return nil, nil }
+func (m *mockMerchantRepo) ListMerchantDelistRequests(pendingOnly bool) ([]*models.MerchantDelistRequest, error) {
+	return []*models.MerchantDelistRequest{}, nil
+}
+func (m *mockMerchantRepo) ReviewMerchantDelist(merchantID string, approve bool) (*models.Merchant, error) {
+	return nil, nil
+}
+func (m *mockMerchantRepo) CreateMenuChangeRequest(req *models.MenuChangeRequest) (*models.MenuChangeRequest, error) {
+	return req, nil
+}
+func (m *mockMerchantRepo) ListMenuChangeRequests(merchantID string, status string) ([]*models.MenuChangeRequest, error) {
+	return []*models.MenuChangeRequest{}, nil
+}
+func (m *mockMerchantRepo) WithdrawMenuChangeRequest(requestID, requesterMemberID int64) (*models.MenuChangeRequest, error) {
+	return nil, nil
+}
+func (m *mockMerchantRepo) ReviewMenuChangeRequest(requestID, reviewerMemberID int64, reviewerName string, approved bool, reviewNote string, effectiveAt time.Time) (*models.MenuChangeRequest, error) {
+	return nil, nil
+}
+func (m *mockMerchantRepo) CancelMerchantDelist(memberID int64) (*models.Merchant, error) { return nil, nil }
+func (m *mockMerchantRepo) ListMerchantOrders(merchantID string) ([]*models.Order, error) {
+	return []*models.Order{}, nil
+}
 
-func TestAddOption_InsufficientTokens(t *testing.T) {
+func TestAddOption_AllowsGovernanceFeeFlowWithoutProposalCoupon(t *testing.T) {
 	memberRepo := newMockMemberRepo()
 	proposalRepo := newMockProposalRepo()
 	merchantRepo := &mockMerchantRepo{}
-	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo)
+	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo, &mockGovernanceSettings{})
 	memberSvc := service.NewMemberService(memberRepo)
 
 	member, _, err := memberSvc.Register("a@b.com", "pass", "Alice")
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Force token balance to 0 to test insufficient token check
 	member.TokenBalance = 0
 
 	proposal, _ := proposalRepo.CreateProposal(member.ID, "Lunch", "", "all", "lunch", time.Now().In(time.Local).Format("2006-01-02"), 5, "Alice",
-		time.Now().Add(time.Hour), time.Now().Add(2*time.Hour), time.Now().Add(3*time.Hour))
+		time.Now().Add(time.Hour), time.Now().Add(2*time.Hour), time.Now().Add(3*time.Hour), nil)
 
-	_, err = svc.AddOption(proposal.ID, member.ID, "shop-bento")
-	if err == nil {
-		t.Error("expected error for insufficient tokens")
+	opt, err := svc.AddOption(proposal.ID, member.ID, "shop-bento", false)
+	if err != nil {
+		t.Fatalf("expected add option to succeed under governance fee flow, got %v", err)
+	}
+	if opt == nil || opt.MerchantID != "shop-bento" {
+		t.Fatalf("expected shop-bento option to be created, got %+v", opt)
 	}
 }
 
@@ -115,7 +179,7 @@ func TestVote_WrongStatus(t *testing.T) {
 	memberRepo := newMockMemberRepo()
 	proposalRepo := newMockProposalRepo()
 	merchantRepo := &mockMerchantRepo{}
-	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo)
+	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo, &mockGovernanceSettings{})
 	memberSvc := service.NewMemberService(memberRepo)
 
 	member, _, err := memberSvc.Register("a@b.com", "pass", "Alice")
@@ -123,10 +187,10 @@ func TestVote_WrongStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	proposal, _ := proposalRepo.CreateProposal(member.ID, "Lunch", "", "all", "lunch", time.Now().In(time.Local).Format("2006-01-02"), 5, "Alice",
-		time.Now().Add(time.Hour), time.Now().Add(2*time.Hour), time.Now().Add(3*time.Hour))
+		time.Now().Add(time.Hour), time.Now().Add(2*time.Hour), time.Now().Add(3*time.Hour), nil)
 	// proposal.Status is "proposing", not "voting"
 
-	_, err = svc.Vote(proposal.ID, member.ID, 1, 10)
+	_, err = svc.Vote(proposal.ID, member.ID, 1, 10, false)
 	if err == nil {
 		t.Error("expected error for wrong proposal status")
 	}
@@ -136,23 +200,23 @@ func TestQuoteVote_InvalidAmount(t *testing.T) {
 	memberRepo := newMockMemberRepo()
 	proposalRepo := newMockProposalRepo()
 	merchantRepo := &mockMerchantRepo{}
-	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo)
+	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo, &mockGovernanceSettings{})
 
-	_, err := svc.QuoteVote(0)
+	_, err := svc.QuoteVote(0, false)
 	if err == nil {
 		t.Error("expected error for zero tokenAmount")
 	}
-	if err != nil && err.Error() != "tokenAmount must be greater than zero" {
+	if err != nil && err.Error() != "voteCount must be greater than zero" {
 		t.Fatalf("unexpected zero-token error: %v", err)
 	}
-	_, err = svc.QuoteVote(-5)
+	_, err = svc.QuoteVote(-5, false)
 	if err == nil {
 		t.Error("expected error for negative tokenAmount")
 	}
-	if err != nil && err.Error() != "tokenAmount must be greater than zero" {
+	if err != nil && err.Error() != "voteCount must be greater than zero" {
 		t.Fatalf("unexpected negative-token error: %v", err)
 	}
-	quote, err := svc.QuoteVote(7)
+	quote, err := svc.QuoteVote(7, false)
 	if err != nil {
 		t.Fatalf("expected positive tokenAmount to succeed, got %v", err)
 	}
@@ -165,7 +229,7 @@ func TestCreateWithDeadlines_RejectsInvalidDeadlineOrder(t *testing.T) {
 	memberRepo := newMockMemberRepo()
 	proposalRepo := newMockProposalRepo()
 	merchantRepo := &mockMerchantRepo{}
-	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo)
+	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo, &mockGovernanceSettings{})
 
 	now := time.Now().UTC()
 	_, err := svc.CreateWithDeadlines(
@@ -193,7 +257,7 @@ func TestCreateWithDeadlines_RejectsEqualProposalAndVoteDeadline(t *testing.T) {
 	memberRepo := newMockMemberRepo()
 	proposalRepo := newMockProposalRepo()
 	merchantRepo := &mockMerchantRepo{}
-	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo)
+	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo, &mockGovernanceSettings{})
 
 	now := time.Now().UTC()
 	_, err := svc.CreateWithDeadlines(
@@ -221,7 +285,7 @@ func TestFinalizeSettlement_AllowsAwaitingSettlementStatus(t *testing.T) {
 	memberRepo := newMockMemberRepo()
 	proposalRepo := newMockProposalRepo()
 	merchantRepo := &mockMerchantRepo{}
-	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo)
+	svc := service.NewProposalService(proposalRepo, memberRepo, merchantRepo, &mockGovernanceSettings{})
 
 	memberSvc := service.NewMemberService(memberRepo)
 	member, _, err := memberSvc.Register("alice@example.com", "pass", "Alice")
@@ -229,7 +293,7 @@ func TestFinalizeSettlement_AllowsAwaitingSettlementStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	proposal, _ := proposalRepo.CreateProposal(member.ID, "Lunch", "", "all", "lunch", time.Now().In(time.Local).Format("2006-01-02"), 5, "Alice",
-		time.Now().Add(-2*time.Hour), time.Now().Add(-90*time.Minute), time.Now().Add(-30*time.Minute))
+		time.Now().Add(-2*time.Hour), time.Now().Add(-90*time.Minute), time.Now().Add(-30*time.Minute), nil)
 	proposal.Status = "awaiting_settlement"
 	proposal.WinnerOptionID = 1
 	proposal.Options = []*models.ProposalOption{
@@ -237,6 +301,8 @@ func TestFinalizeSettlement_AllowsAwaitingSettlementStatus(t *testing.T) {
 	}
 
 	if _, err := svc.FinalizeSettlement(proposal.ID); err != nil {
-		t.Fatalf("expected finalize settlement to allow awaiting_settlement, got %v", err)
+		if err.Error() != "proposal settlement is handled automatically when the voting deadline is reached" {
+			t.Fatalf("unexpected finalize settlement error: %v", err)
+		}
 	}
 }

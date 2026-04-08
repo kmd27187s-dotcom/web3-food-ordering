@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { CreditCard, FolderKanban, Gift, Settings, Store, Users } from "lucide-react";
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 
 import { claimTickets, fetchGroups, fetchMe, fetchMyOrderHistory, fetchProposals, type Group, type Member, type MemberOrderHistory, type Proposal } from "@/lib/api";
 
@@ -14,23 +15,55 @@ type DashboardState = {
 };
 
 export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boolean }) {
+  const pathname = usePathname();
   const [state, setState] = useState<DashboardState>({ member: null, groups: [], orderHistory: null, proposals: [] });
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState(openSubscribe ? "請先開通月訂閱。" : "");
   const [pending, setPending] = useState(false);
 
   async function refresh() {
-    return Promise.all([fetchMe(), fetchGroups().catch(() => []), fetchMyOrderHistory().catch(() => ({ orders: [] })), fetchProposals().catch(() => [])])
-      .then(([member, groups, orderHistory, proposals]) => {
-        setState({ member, groups, orderHistory, proposals });
-      });
+    const [memberResult, groupsResult, orderHistoryResult, proposalsResult] = await Promise.allSettled([
+      fetchMe(),
+      fetchGroups(),
+      fetchMyOrderHistory(),
+      fetchProposals()
+    ]);
+
+    if (memberResult.status !== "fulfilled") {
+      throw memberResult.reason;
+    }
+
+    const groups = groupsResult.status === "fulfilled" ? groupsResult.value : [];
+    const orderHistory = orderHistoryResult.status === "fulfilled" ? orderHistoryResult.value : { orders: [] };
+    const proposals = proposalsResult.status === "fulfilled" ? proposalsResult.value : [];
+
+    setState({
+      member: memberResult.value,
+      groups,
+      orderHistory,
+      proposals
+    });
+
+    const messages: string[] = [];
+    if (groupsResult.status !== "fulfilled") {
+      messages.push("群組資料讀取失敗");
+    }
+    if (orderHistoryResult.status !== "fulfilled") {
+      messages.push("訂單紀錄讀取失敗");
+    }
+    if (proposalsResult.status !== "fulfilled") {
+      messages.push("成立中訂單讀取失敗");
+    }
+    if (messages.length > 0) {
+      setMessage(messages.join("，"));
+    }
   }
 
   useEffect(() => {
     refresh()
       .catch((error) => setMessage(error instanceof Error ? error.message : "目前無法讀取會員資料"))
       .finally(() => setLoading(false));
-  }, [openSubscribe]);
+  }, [openSubscribe, pathname]);
 
   async function handleClaimTickets() {
     setPending(true);
@@ -41,7 +74,7 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
         member: result.member
       }));
       await refresh();
-      setMessage(`已領取提案券 ${result.claimedProposalTickets} 張、投票券 ${result.claimedVoteTickets} 張、建立訂單券 ${result.claimedCreateOrderTickets} 張。`);
+      setMessage(`已領取提案優惠券 ${result.claimedProposalTickets} 張、投票優惠券 ${result.claimedVoteTickets} 張、建立訂單優惠券 ${result.claimedCreateOrderTickets} 張。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "領券失敗");
     } finally {
@@ -76,13 +109,13 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <Stat label="積分" value={`${state.member.points} pts`} />
-            <Stat label="Token" value={`${state.member.tokenBalance}`} />
+            <Stat label="平台 Token" value={`${state.member.tokenBalance}`} />
             <LinkedStat label="參與群組數" value={`${state.groups.length}`} href="/member/groups" />
             <LinkedStat label="訂單紀錄" value={`${state.orderHistory?.orders.length || 0}`} href="/member/orders" />
             <LinkedStat label="成立中訂單數" value={`${activeProposalCount}`} href="/member/ongoing-orders" />
-            <LinkedStat label="提案券" value={`${state.member.proposalTicketCount} 張`} href="/records?tab=proposal-ticket" />
-            <LinkedStat label="投票券" value={`${state.member.voteTicketCount} 張`} href="/records?tab=vote-ticket" />
-            <LinkedStat label="建立訂單券" value={`${state.member.createOrderTicketCount} 張`} href="/records?tab=create-order-ticket" />
+            <LinkedStat label="提案優惠券" value={`${state.member.proposalCouponCount} 張`} href="/records?tab=proposal-coupon" />
+            <LinkedStat label="投票優惠券" value={`${state.member.voteCouponCount} 張`} href="/records?tab=vote-coupon" />
+            <LinkedStat label="建立訂單優惠券" value={`${state.member.createOrderCouponCount} 張`} href="/records?tab=create-order-coupon" />
             <LinkedStat label="個人邀請碼" value={state.member.registrationInviteCode || "尚未產生"} href="/records?tab=invite" />
           </div>
         </div>
@@ -91,9 +124,9 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
           <p className="meal-kicker">Status</p>
           <div className="mt-5 grid gap-4">
             <LinkedStat label="訂閱狀態" value={state.member.subscriptionActive ? "已訂閱" : "尚未訂閱成為會員"} href="/member/subscription" />
-            <Stat label="待領提案券" value={`${state.member.claimableProposalTickets} 張`} />
-            <Stat label="待領投票券" value={`${state.member.claimableVoteTickets} 張`} />
-            <Stat label="待領建立訂單券" value={`${state.member.claimableCreateOrderTickets} 張`} />
+            <Stat label="待領提案優惠券" value={`${state.member.claimableProposalCoupons} 張`} />
+            <Stat label="待領投票優惠券" value={`${state.member.claimableVoteCoupons} 張`} />
+            <Stat label="待領建立訂單優惠券" value={`${state.member.claimableCreateOrderCoupons} 張`} />
             <Stat
               label="訂閱到期"
               value={state.member.subscriptionExpiresAt ? new Date(state.member.subscriptionExpiresAt).toLocaleString("zh-TW") : "尚未開通"}
@@ -102,7 +135,7 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
           <button
             type="button"
             onClick={handleClaimTickets}
-            disabled={pending || (state.member.claimableProposalTickets <= 0 && state.member.claimableVoteTickets <= 0 && state.member.claimableCreateOrderTickets <= 0)}
+            disabled={pending || (state.member.claimableProposalCoupons <= 0 && state.member.claimableVoteCoupons <= 0 && state.member.claimableCreateOrderCoupons <= 0)}
             className="mt-5 inline-flex items-center gap-2 rounded-full border border-border bg-background/80 px-4 py-2 text-sm font-semibold text-primary transition hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Gift className="h-4 w-4" />

@@ -10,6 +10,7 @@ import { clearStoredToken, fetchMe, fetchMerchantDashboard, getStoredToken, setS
 import { authenticateWithWallet, clearWalletConnection, getConnectedWalletAddress } from "@/lib/wallet-auth";
 
 const memberLinks = [
+  { href: "/member/groups", label: "群組" },
   { href: "/member/ordering", label: "建立訂單" },
   { href: "/member/ongoing-orders", label: "成立中訂單" },
   { href: "/member/ordering/submitted", label: "完成送出訂單" },
@@ -19,6 +20,7 @@ const memberLinks = [
 const adminLinks = [
   { href: "/admin", label: "後台總覽" },
   { href: "/admin/metrics", label: "數據總覽" },
+  { href: "/admin/settings", label: "治理參數" },
   { href: "/admin/payouts", label: "平台撥款" },
   { href: "/admin/menu-reviews", label: "菜單審核" },
   { href: "/admin/merchant-delists", label: "下架審核" }

@@ -5,7 +5,7 @@ import { UsageLedger } from "@/components/usage-ledger";
 export default async function RecordsPage({
   searchParams
 }: {
-  searchParams?: Promise<{ tab?: "usage" | "proposal-ticket" | "vote-ticket" | "create-order-ticket" | "invite" }>;
+  searchParams?: Promise<{ tab?: "usage" | "proposal-coupon" | "vote-coupon" | "create-order-coupon" | "invite" }>;
 }) {
   const params = (await searchParams) ?? {};
   return (

@@ -28,13 +28,13 @@ export function MemberOrderingHeader() {
       <div className="meal-glass-card rounded-[1.75rem] p-6">
         <p className="meal-kicker">Status</p>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <Stat label="我的 Token" value={`${member?.tokenBalance || 0}`} />
-          <Stat label="我的提案券" value={`${member?.proposalTicketCount || 0} 張`} />
-          <Stat label="待領取提案券" value={`${member?.claimableProposalTickets || 0} 張`} />
-          <Stat label="我的投票券" value={`${member?.voteTicketCount || 0} 張`} />
-          <Stat label="待領投票券" value={`${member?.claimableVoteTickets || 0} 張`} />
-          <Stat label="我的建立訂單券" value={`${member?.createOrderTicketCount || 0} 張`} />
-          <Stat label="待領建立訂單券" value={`${member?.claimableCreateOrderTickets || 0} 張`} />
+          <Stat label="平台 Token" value={`${member?.tokenBalance || 0}`} />
+          <Stat label="我的提案優惠券" value={`${member?.proposalCouponCount || 0} 張`} />
+          <Stat label="待領提案優惠券" value={`${member?.claimableProposalCoupons || 0} 張`} />
+          <Stat label="我的投票優惠券" value={`${member?.voteCouponCount || 0} 張`} />
+          <Stat label="待領投票優惠券" value={`${member?.claimableVoteCoupons || 0} 張`} />
+          <Stat label="我的建立訂單優惠券" value={`${member?.createOrderCouponCount || 0} 張`} />
+          <Stat label="待領建立訂單優惠券" value={`${member?.claimableCreateOrderCoupons || 0} 張`} />
           <Stat label="我的積分" value={`${member?.points || 0} pts`} />
           <Stat label="參與群組數" value={`${groups.length} 個`} />
           <Stat label="訂閱狀態" value={member?.subscriptionActive ? "已訂閱" : "尚未訂閱成為會員"} />

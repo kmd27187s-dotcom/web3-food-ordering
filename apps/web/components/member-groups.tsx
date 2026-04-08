@@ -28,6 +28,15 @@ export function MemberGroups() {
       .finally(() => setLoading(false));
   }, []);
 
+  const ownedGroups = useMemo(
+    () => groups.filter((group) => group.ownerMemberId === member?.id),
+    [groups, member?.id]
+  );
+  const joinedGroups = useMemo(
+    () => groups.filter((group) => !ownedGroups.some((owned) => owned.id === group.id)),
+    [groups, ownedGroups]
+  );
+
   async function handleCreateGroup() {
     if (!createName.trim()) return;
     setPending(true);
@@ -59,15 +68,6 @@ export function MemberGroups() {
   }
 
   if (loading) return <div className="rounded-[1.5rem] border border-border bg-card p-8">正在載入群組清單...</div>;
-
-  const ownedGroups = useMemo(
-    () => groups.filter((group) => group.ownerMemberId === member?.id),
-    [groups, member?.id]
-  );
-  const joinedGroups = useMemo(
-    () => groups.filter((group) => !ownedGroups.some((owned) => owned.id === group.id)),
-    [groups, ownedGroups]
-  );
 
   function sortGroups(items: Group[]) {
     return [...items].sort((left, right) => {

@@ -1305,6 +1305,7 @@ func TestOrderSignAllowsLocalProposalOrderingWithoutChainMapping(t *testing.T) {
 		now.Add(-90*time.Minute),
 		now.Add(-30*time.Minute),
 		now.Add(30*time.Minute),
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("create local proposal: %v", err)
@@ -1312,7 +1313,7 @@ func TestOrderSignAllowsLocalProposalOrderingWithoutChainMapping(t *testing.T) {
 	if err := appStore.SetProposalGroupID(proposal.ID, group.ID); err != nil {
 		t.Fatalf("link local proposal to group: %v", err)
 	}
-	option, err := appStore.InsertProposalOption(proposal.ID, alice.ID, "shop-hotpot", "湯潮火鍋", "Alice", 0)
+	option, err := appStore.InsertProposalOption(proposal.ID, alice.ID, "shop-hotpot", "湯潮火鍋", "Alice", 0, false)
 	if err != nil {
 		t.Fatalf("insert winning option: %v", err)
 	}

@@ -76,6 +76,14 @@ func (m *mockMemberRepo) MemberByID(id int64) (*models.Member, error) {
 	}
 	return nil, errors.New("member not found")
 }
+func (m *mockMemberRepo) ListMemberOrders(memberID int64) ([]*models.Order, error) { return []*models.Order{}, nil }
+func (m *mockMemberRepo) MemberReviewCount(memberID int64) (int64, error) { return 0, nil }
+func (m *mockMemberRepo) ListRegistrationInviteUsages(memberID int64) ([]*models.RegistrationInviteUsage, error) {
+	return []*models.RegistrationInviteUsage{}, nil
+}
+func (m *mockMemberRepo) RecordRegistrationInviteUsage(inviteCode string, inviterMemberID, usedByMemberID int64) error {
+	return nil
+}
 func (m *mockMemberRepo) UpgradePasswordHash(memberID int64, hash string) error { return nil }
 func (m *mockMemberRepo) CreateSession(memberID int64, token string) error {
 	m.sessions[token] = memberID
@@ -104,24 +112,32 @@ func (m *mockMemberRepo) AddClaimableTickets(memberID, proposalTickets int64) er
 	for _, mem := range m.members {
 		if mem.ID == memberID {
 			mem.ClaimableProposalTickets += proposalTickets
+			mem.ClaimableVoteTickets += proposalTickets
+			mem.ClaimableCreateOrderTickets += proposalTickets
 			return nil
 		}
 	}
 	return errors.New("member not found")
 }
-func (m *mockMemberRepo) ClaimTickets(memberID int64) (int64, error) {
+func (m *mockMemberRepo) ClaimTickets(memberID int64) (int64, int64, int64, error) {
 	for _, mem := range m.members {
 		if mem.ID == memberID {
 			proposalTickets := mem.ClaimableProposalTickets
-			if proposalTickets == 0 {
-				return 0, errors.New("no claimable tickets")
+			voteTickets := mem.ClaimableVoteTickets
+			createTickets := mem.ClaimableCreateOrderTickets
+			if proposalTickets == 0 && voteTickets == 0 && createTickets == 0 {
+				return 0, 0, 0, errors.New("no claimable tickets")
 			}
 			mem.ProposalTicketCount += proposalTickets
+			mem.VoteTicketCount += voteTickets
+			mem.CreateOrderTicketCount += createTickets
 			mem.ClaimableProposalTickets = 0
-			return proposalTickets, nil
+			mem.ClaimableVoteTickets = 0
+			mem.ClaimableCreateOrderTickets = 0
+			return proposalTickets, voteTickets, createTickets, nil
 		}
 	}
-	return 0, errors.New("member not found")
+	return 0, 0, 0, errors.New("member not found")
 }
 func (m *mockMemberRepo) GrantDailyLoginProposalTicket(memberID int64, now time.Time) (bool, error) {
 	for _, mem := range m.members {
@@ -153,9 +169,7 @@ func (m *mockMemberRepo) DeleteWalletAuthChallenge(walletAddress string) error {
 	return nil
 }
 func (m *mockMemberRepo) RawLeaderboard() ([]*models.LeaderboardEntry, error) { return nil, nil }
-func (m *mockMemberRepo) MemberStats(memberID int64) (int64, int64, int64, error) {
-	return 0, 0, 0, nil
-}
+func (m *mockMemberRepo) MemberStats(memberID int64) (int64, int64, int64, error) { return 0, 0, 0, nil }
 
 func TestRegister_Success(t *testing.T) {
 	repo := newMockMemberRepo()

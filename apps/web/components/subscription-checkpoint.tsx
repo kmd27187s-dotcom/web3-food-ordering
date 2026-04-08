@@ -52,12 +52,12 @@ export function SubscriptionCheckpoint() {
           <div className="meal-section-heading">
             <p className="meal-kicker">Subscription checkpoint</p>
             <h1>尚未訂閱成為會員。</h1>
-            <p>99 Token / 30 天。</p>
+            <p>99 平台 Token / 30 天。</p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
             <AccessStat label="會員" value={member?.displayName || "—"} />
-            <AccessStat label="訂閱費用" value="99 Token" />
+            <AccessStat label="訂閱費用" value="99 平台 Token" />
             <AccessStat label="有效期間" value="30 天" />
           </div>
 
@@ -74,7 +74,7 @@ export function SubscriptionCheckpoint() {
           <div className="mt-5 space-y-4">
             {[
               "會員頁",
-              "治理頁",
+              "建立訂單 / 成立中訂單",
               "紀錄頁"
             ].map((item) => (
               <div key={item} className="flex items-start gap-3">

@@ -190,11 +190,25 @@ type postgresProposalModel struct {
 	CreatedBy        int64     `gorm:"not null;index"`
 	CreatedByName    string    `gorm:"not null"`
 	UsedCreateOrderTicket bool `gorm:"not null;default:false"`
+	CreateFeeWei     int64     `gorm:"not null;default:0"`
+	CreateFeeRefundWei int64   `gorm:"not null;default:0"`
+	CreateFeePlatformWei int64 `gorm:"not null;default:0"`
+	ProposalFeeWei   int64     `gorm:"not null;default:0"`
+	VoteFeeWei       int64     `gorm:"not null;default:0"`
+	WinnerProposalRefundBps int64 `gorm:"not null;default:0"`
+	LoserProposalRefundBps  int64 `gorm:"not null;default:0"`
+	VoteRefundBps    int64     `gorm:"not null;default:0"`
+	WinnerBonusBps   int64     `gorm:"not null;default:0"`
+	LoserBonusBps    int64     `gorm:"not null;default:0"`
+	WinnerProposalPoints int64 `gorm:"not null;default:0"`
+	WinnerVotePointsPerVote int64 `gorm:"not null;default:0"`
 	ProposalDeadline time.Time `gorm:"not null"`
 	VoteDeadline     time.Time `gorm:"not null"`
 	OrderDeadline    time.Time `gorm:"not null"`
 	WinnerOptionID   int64     `gorm:"not null;default:0"`
 	RewardsApplied   bool      `gorm:"not null;default:false"`
+	SettledAt        *time.Time
+	FailedReason     string
 	GroupID          *int64
 	CreatedAt        time.Time `gorm:"not null"`
 }
@@ -203,12 +217,17 @@ func (postgresProposalModel) TableName() string { return "proposals" }
 
 type postgresProposalOptionModel struct {
 	ID               int64     `gorm:"primaryKey"`
-	ProposalID       int64     `gorm:"not null;index;uniqueIndex:idx_proposal_options_proposal_proposer_unique"`
-	MerchantID       string    `gorm:"not null"`
+	ProposalID       int64     `gorm:"not null;index;uniqueIndex:idx_proposal_options_proposal_merchant_unique"`
+	MerchantID       string    `gorm:"not null;uniqueIndex:idx_proposal_options_proposal_merchant_unique"`
 	MerchantName     string    `gorm:"not null"`
-	ProposerMemberID int64     `gorm:"not null;index;uniqueIndex:idx_proposal_options_proposal_proposer_unique"`
+	ProposerMemberID int64     `gorm:"not null;index"`
 	ProposerName     string    `gorm:"not null"`
 	UsedProposalTicket bool    `gorm:"not null;default:false"`
+	ProposalFeePaidWei int64   `gorm:"not null;default:0"`
+	VoteFeeCollectedWei int64  `gorm:"not null;default:0"`
+	VoteRefundWei    int64     `gorm:"not null;default:0"`
+	ProposerRefundWei int64    `gorm:"not null;default:0"`
+	ProposerRewardWei int64    `gorm:"not null;default:0"`
 	WeightedVotes    int64     `gorm:"not null;default:0"`
 	TokenStake       int64     `gorm:"not null;default:0"`
 	PartialRefund    int64     `gorm:"not null;default:0"`
@@ -225,7 +244,10 @@ type postgresVoteModel struct {
 	MemberName   string    `gorm:"not null"`
 	OptionID     int64     `gorm:"not null;index"`
 	TokenAmount  int64     `gorm:"not null"`
+	FeeAmountWei int64     `gorm:"not null;default:0"`
 	VoteWeight   int64     `gorm:"not null"`
+	VoteCount    int64     `gorm:"not null;default:0"`
+	RefundWei    int64     `gorm:"not null;default:0"`
 	UseVoteTicket bool     `gorm:"not null;default:false"`
 	SubmittedAt  time.Time `gorm:"not null"`
 	WalletHidden bool      `gorm:"not null;default:true"`
@@ -239,6 +261,7 @@ type postgresOrderModel struct {
 	MemberID           int64     `gorm:"not null;index"`
 	MemberName         string    `gorm:"not null"`
 	MerchantID         string    `gorm:"not null"`
+	EscrowOrderID      *int64    `gorm:"index"`
 	OrderHash          string    `gorm:"not null"`
 	AmountWei          string    `gorm:"not null"`
 	Status             string    `gorm:"not null"`
@@ -445,6 +468,12 @@ func (s *PostgresStore) autoMigrate() error {
 	if err := s.db.Exec("DROP INDEX IF EXISTS idx_proposals_group_period_date_unique").Error; err != nil {
 		return err
 	}
+	if err := s.db.Exec("DROP INDEX IF EXISTS idx_proposal_options_proposal_proposer_unique").Error; err != nil {
+		return err
+	}
+	if err := s.db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_proposal_options_proposal_merchant_unique ON proposal_options (proposal_id, merchant_id)").Error; err != nil {
+		return err
+	}
 	return s.backfillLegacyOrders()
 }
 
@@ -455,6 +484,9 @@ func (s *PostgresStore) SetInactiveGroupThresholdDays(days int64) {
 }
 
 func (s *PostgresStore) ContractInfo() models.ContractInfo {
+	if strings.TrimSpace(s.contractInfo.PlatformTreasury) != "" && !strings.EqualFold(strings.TrimSpace(s.contractInfo.PlatformTreasury), "0x0000000000000000000000000000000000000000") {
+		return s.contractInfo
+	}
 	ctx := context.Background()
 	var setting postgresSystemSettingModel
 	if err := s.db.WithContext(ctx).First(&setting, "key = ?", "platform_treasury").Error; err == nil && strings.TrimSpace(setting.Value) != "" {
@@ -463,6 +495,131 @@ func (s *PostgresStore) ContractInfo() models.ContractInfo {
 		return info
 	}
 	return s.contractInfo
+}
+
+func defaultGovernanceParams() *models.GovernanceParams {
+	return &models.GovernanceParams{
+		CreateFeeWei:                defaultCreateFeeWei,
+		ProposalFeeWei:              defaultProposalFeeWei,
+		VoteFeeWei:                  defaultVoteFeeWei,
+		WinnerProposalRefundBps:     defaultWinnerProposalRefundBps,
+		LoserProposalRefundBps:      defaultLoserProposalRefundBps,
+		VoteRefundBps:               defaultVoteRefundBps,
+		WinnerBonusBps:              defaultWinnerBonusBps,
+		LoserBonusBps:               defaultLoserBonusBps,
+		WinnerProposalPoints:        defaultWinnerProposalPoints,
+		WinnerVotePointsPerVote:     defaultWinnerVotePointsPerVote,
+		ProposalDurationMinutes:     defaultProposalDurationMinutes,
+		VoteDurationMinutes:         defaultVoteDurationMinutes,
+		OrderingDurationMinutes:     defaultOrderingDurationMinutes,
+		DailyCreateCouponCount:      defaultDailyCreateCouponCount,
+		DailyProposalCouponCount:    defaultDailyProposalCouponCount,
+		DailyVoteCouponCount:        defaultDailyVoteCouponCount,
+		PlatformEscrowFeeBps:        defaultPlatformEscrowFeeBps,
+		MerchantAcceptTimeoutMins:   defaultMerchantAcceptTimeoutMins,
+		MerchantCompleteTimeoutMins: defaultMerchantCompleteTimeoutMins,
+		MemberConfirmTimeoutMins:    defaultMemberConfirmTimeoutMins,
+		GovernanceClaimTimeoutMins:  defaultGovernanceClaimTimeoutMins,
+		EscrowClaimTimeoutMins:      defaultEscrowClaimTimeoutMins,
+	}
+}
+
+func (s *PostgresStore) GovernanceParams() (*models.GovernanceParams, error) {
+	ctx := context.Background()
+	params := defaultGovernanceParams()
+	var setting postgresSystemSettingModel
+	err := s.db.WithContext(ctx).First(&setting, "key = ?", "governance_params").Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return params, nil
+		}
+		return nil, err
+	}
+	merged := defaultGovernanceParams()
+	if decodeErr := json.Unmarshal([]byte(setting.Value), merged); decodeErr != nil {
+		return params, nil
+	}
+	return merged, nil
+}
+
+func (s *PostgresStore) SetGovernanceParams(params *models.GovernanceParams) (*models.GovernanceParams, error) {
+	ctx := context.Background()
+	if params == nil {
+		params = defaultGovernanceParams()
+	}
+	payload, err := json.Marshal(params)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.db.WithContext(ctx).Save(&postgresSystemSettingModel{
+		Key:       "governance_params",
+		Value:     string(payload),
+		UpdatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		return nil, err
+	}
+	return s.GovernanceParams()
+}
+
+func (s *PostgresStore) LinkProposalChain(localProposalID, chainProposalID int64) error {
+	if localProposalID <= 0 || chainProposalID <= 0 {
+		return errors.New("invalid proposal chain mapping")
+	}
+	ctx := context.Background()
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var proposal postgresProposalModel
+		if err := tx.First(&proposal, "id = ?", localProposalID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("proposal not found")
+			}
+			return err
+		}
+		var existing postgresProposalChainMapModel
+		err := tx.First(&existing, "local_proposal_id = ?", localProposalID).Error
+		if err == nil {
+			return tx.Model(&postgresProposalChainMapModel{}).
+				Where("local_proposal_id = ?", localProposalID).
+				Update("chain_proposal_id", chainProposalID).Error
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		return tx.Create(&postgresProposalChainMapModel{
+			LocalProposalID: localProposalID,
+			ChainProposalID: chainProposalID,
+		}).Error
+	})
+}
+
+func (s *PostgresStore) LinkProposalOptionChain(localProposalID, localOptionID, chainOptionIndex int64) error {
+	if localProposalID <= 0 || localOptionID <= 0 || chainOptionIndex <= 0 {
+		return errors.New("invalid proposal option chain mapping")
+	}
+	ctx := context.Background()
+	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var option postgresProposalOptionModel
+		if err := tx.First(&option, "id = ? AND proposal_id = ?", localOptionID, localProposalID).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return errors.New("proposal option not found")
+			}
+			return err
+		}
+		var existing postgresProposalOptionChainMapModel
+		err := tx.First(&existing, "local_option_id = ?", localOptionID).Error
+		if err == nil {
+			return tx.Model(&postgresProposalOptionChainMapModel{}).
+				Where("local_option_id = ?", localOptionID).
+				Update("chain_option_index", chainOptionIndex).Error
+		}
+		if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		return tx.Create(&postgresProposalOptionChainMapModel{
+			LocalOptionID:    localOptionID,
+			LocalProposalID:  localProposalID,
+			ChainOptionIndex: chainOptionIndex,
+		}).Error
+	})
 }
 
 func (s *PostgresStore) SetPlatformTreasury(address string) (models.ContractInfo, error) {
@@ -720,7 +877,11 @@ func (s *PostgresStore) ClaimTickets(memberID int64) (proposalTickets int64, vot
 func (s *PostgresStore) GrantDailyLoginProposalTicket(memberID int64, now time.Time) (bool, error) {
 	ctx := context.Background()
 	granted := false
-	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	params, err := s.GovernanceParams()
+	if err != nil {
+		return false, err
+	}
+	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var member postgresMemberModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&member, "id = ?", memberID).Error; err != nil {
 			return err
@@ -731,9 +892,9 @@ func (s *PostgresStore) GrantDailyLoginProposalTicket(memberID int64, now time.T
 			return nil
 		}
 		if err := tx.Model(&postgresMemberModel{}).Where("id = ?", memberID).Updates(map[string]any{
-			"claimable_proposal_tickets": gorm.Expr("claimable_proposal_tickets + 1"),
-			"claimable_vote_tickets":     gorm.Expr("claimable_vote_tickets + 1"),
-			"claimable_create_order_tickets": gorm.Expr("claimable_create_order_tickets + 1"),
+			"claimable_proposal_tickets":     gorm.Expr("claimable_proposal_tickets + ?", params.DailyProposalCouponCount),
+			"claimable_vote_tickets":         gorm.Expr("claimable_vote_tickets + ?", params.DailyVoteCouponCount),
+			"claimable_create_order_tickets": gorm.Expr("claimable_create_order_tickets + ?", params.DailyCreateCouponCount),
 			"last_daily_login_reward_at": now.UTC(),
 		}).Error; err != nil {
 			return err
@@ -798,7 +959,7 @@ func (s *PostgresStore) MemberStats(memberID int64) (proposalsCreated, ordersSub
 	return proposalsCreated, ordersSubmitted, votesCast, nil
 }
 
-func (s *PostgresStore) CreateProposal(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time) (*models.Proposal, error) {
+func (s *PostgresStore) CreateProposal(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time, params *models.GovernanceParams) (*models.Proposal, error) {
 	ctx := context.Background()
 	now := time.Now().UTC()
 	if maxOptions <= 0 {
@@ -807,7 +968,35 @@ func (s *PostgresStore) CreateProposal(memberID int64, title, description, merch
 	if mealPeriod == "" {
 		mealPeriod = "lunch"
 	}
-	proposal := &postgresProposalModel{Title: title, Description: description, MerchantGroup: merchantGroup, MealPeriod: mealPeriod, ProposalDate: proposalDate, MaxOptions: maxOptions, CreatedBy: memberID, CreatedByName: createdByName, ProposalDeadline: proposalDeadline.UTC(), VoteDeadline: voteDeadline.UTC(), OrderDeadline: orderDeadline.UTC(), WinnerOptionID: 0, RewardsApplied: false, CreatedAt: now}
+	if params == nil {
+		params = defaultGovernanceParams()
+	}
+	proposal := &postgresProposalModel{
+		Title:                    title,
+		Description:              description,
+		MerchantGroup:            merchantGroup,
+		MealPeriod:               mealPeriod,
+		ProposalDate:             proposalDate,
+		MaxOptions:               maxOptions,
+		CreatedBy:                memberID,
+		CreatedByName:            createdByName,
+		CreateFeeWei:             params.CreateFeeWei,
+		ProposalFeeWei:           params.ProposalFeeWei,
+		VoteFeeWei:               params.VoteFeeWei,
+		WinnerProposalRefundBps:  params.WinnerProposalRefundBps,
+		LoserProposalRefundBps:   params.LoserProposalRefundBps,
+		VoteRefundBps:            params.VoteRefundBps,
+		WinnerBonusBps:           params.WinnerBonusBps,
+		LoserBonusBps:            params.LoserBonusBps,
+		WinnerProposalPoints:     params.WinnerProposalPoints,
+		WinnerVotePointsPerVote:  params.WinnerVotePointsPerVote,
+		ProposalDeadline:         proposalDeadline.UTC(),
+		VoteDeadline:             voteDeadline.UTC(),
+		OrderDeadline:            orderDeadline.UTC(),
+		WinnerOptionID:           0,
+		RewardsApplied:           false,
+		CreatedAt:                now,
+	}
 	if err := s.db.WithContext(ctx).Create(proposal).Error; err != nil {
 		if isDuplicateKeyError(err) {
 			return nil, ErrDuplicateProposalRound
@@ -817,13 +1006,16 @@ func (s *PostgresStore) CreateProposal(memberID int64, title, description, merch
 	return s.GetProposal(proposal.ID)
 }
 
-func (s *PostgresStore) CreateProposalWithCredit(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time, useTicket bool) (*models.Proposal, error) {
+func (s *PostgresStore) CreateProposalWithCredit(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time, params *models.GovernanceParams, useTicket bool) (*models.Proposal, error) {
 	ctx := context.Background()
 	var proposal postgresProposalModel
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		actualAssetType := "token"
-		actualAmount := fmt.Sprintf("%d", proposalTokenCost)
-		actualNote := "建立訂單輪次"
+		if params == nil {
+			params = defaultGovernanceParams()
+		}
+		actualAssetType := "create_order_fee"
+		actualAmount := fmt.Sprintf("%d", params.CreateFeeWei)
+		actualNote := "建立訂單費"
 		var member postgresMemberModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&member, "id = ?", memberID).Error; err != nil {
 			return err
@@ -833,18 +1025,10 @@ func (s *PostgresStore) CreateProposalWithCredit(memberID int64, title, descript
 			if err := tx.Model(&postgresMemberModel{}).Where("id = ? AND create_order_ticket_count > 0", memberID).Update("create_order_ticket_count", gorm.Expr("create_order_ticket_count - 1")).Error; err != nil {
 				return err
 			}
-			actualAssetType = "create_order_ticket"
+			actualAssetType = "create_order_coupon"
 			actualAmount = "1"
-			actualNote = "建立訂單輪次（建立訂單券抵用）"
+			actualNote = "建立訂單費（建立訂單券抵用）"
 			usedCreateOrderTicket = true
-		} else {
-			res := tx.Model(&postgresMemberModel{}).Where("id = ? AND token_balance >= ?", memberID, proposalTokenCost).Update("token_balance", gorm.Expr("token_balance - ?", proposalTokenCost))
-			if res.Error != nil {
-				return res.Error
-			}
-			if res.RowsAffected == 0 {
-				return errors.New("insufficient token balance")
-			}
 		}
 		if maxOptions <= 0 {
 			maxOptions = 5
@@ -852,7 +1036,31 @@ func (s *PostgresStore) CreateProposalWithCredit(memberID int64, title, descript
 		if mealPeriod == "" {
 			mealPeriod = "lunch"
 		}
-		proposal = postgresProposalModel{Title: title, Description: description, MerchantGroup: merchantGroup, MealPeriod: mealPeriod, ProposalDate: proposalDate, MaxOptions: maxOptions, CreatedBy: memberID, CreatedByName: createdByName, UsedCreateOrderTicket: usedCreateOrderTicket, ProposalDeadline: proposalDeadline.UTC(), VoteDeadline: voteDeadline.UTC(), OrderDeadline: orderDeadline.UTC(), CreatedAt: time.Now().UTC()}
+		proposal = postgresProposalModel{
+			Title:                   title,
+			Description:             description,
+			MerchantGroup:           merchantGroup,
+			MealPeriod:              mealPeriod,
+			ProposalDate:            proposalDate,
+			MaxOptions:              maxOptions,
+			CreatedBy:               memberID,
+			CreatedByName:           createdByName,
+			UsedCreateOrderTicket:   usedCreateOrderTicket,
+			CreateFeeWei:            params.CreateFeeWei,
+			ProposalFeeWei:          params.ProposalFeeWei,
+			VoteFeeWei:              params.VoteFeeWei,
+			WinnerProposalRefundBps: params.WinnerProposalRefundBps,
+			LoserProposalRefundBps:  params.LoserProposalRefundBps,
+			VoteRefundBps:           params.VoteRefundBps,
+			WinnerBonusBps:          params.WinnerBonusBps,
+			LoserBonusBps:           params.LoserBonusBps,
+			WinnerProposalPoints:    params.WinnerProposalPoints,
+			WinnerVotePointsPerVote: params.WinnerVotePointsPerVote,
+			ProposalDeadline:        proposalDeadline.UTC(),
+			VoteDeadline:            voteDeadline.UTC(),
+			OrderDeadline:           orderDeadline.UTC(),
+			CreatedAt:               time.Now().UTC(),
+		}
 		if err := tx.Create(&proposal).Error; err != nil {
 			if isDuplicateKeyError(err) {
 				return ErrDuplicateProposalRound
@@ -925,12 +1133,12 @@ func (s *PostgresStore) DeleteProposalByCreator(proposalID, memberID int64) erro
 		if err := tx.Where("proposal_id = ?", proposalID).Find(&options).Error; err != nil {
 			return err
 		}
-		refundTokens := int64(0)
+		refundWei := int64(0)
 		for _, option := range options {
 			if option.ProposerMemberID != memberID {
 				return errors.New("cannot delete after another member has proposed")
 			}
-			refundTokens += option.TokenStake
+			refundWei += option.ProposalFeePaidWei
 		}
 
 		var createUsageCount int64
@@ -940,16 +1148,18 @@ func (s *PostgresStore) DeleteProposalByCreator(proposalID, memberID int64) erro
 			return err
 		}
 		if createUsageCount > 0 {
-			refundTokens += proposalTokenCost
+			refundWei += proposal.CreateFeeWei / 2
 		}
 
-		if refundTokens > 0 {
-			if err := tx.Model(&postgresMemberModel{}).
-				Where("id = ?", memberID).
-				Update("token_balance", gorm.Expr("token_balance + ?", refundTokens)).Error; err != nil {
+		if refundWei > 0 {
+			if err := tx.Model(&postgresProposalModel{}).Where("id = ?", proposalID).Updates(map[string]any{
+				"create_fee_refund_wei":   proposal.CreateFeeWei / 2,
+				"create_fee_platform_wei": proposal.CreateFeeWei - (proposal.CreateFeeWei / 2),
+				"failed_reason":           "cancelled_by_creator",
+			}).Error; err != nil {
 				return err
 			}
-			if err := s.logUsageTxGorm(ctx, tx, memberID, proposalID, "delete_proposal_refund", "token", "credit", fmt.Sprintf("%d", refundTokens), "刪除單人提案退回 token", ""); err != nil {
+			if err := s.logUsageTxGorm(ctx, tx, memberID, proposalID, "delete_proposal_refund", "governance_fee", "credit", fmt.Sprintf("%d", refundWei), "撤回單人訂單退回金額", ""); err != nil {
 				return err
 			}
 		}
@@ -958,11 +1168,10 @@ func (s *PostgresStore) DeleteProposalByCreator(proposalID, memberID int64) erro
 	})
 }
 
-func (s *PostgresStore) InsertProposalOption(proposalID, memberID int64, merchantID, merchantName, proposerName string, tokenCost int64, useTicket bool) (*models.ProposalOption, error) {
+func (s *PostgresStore) InsertProposalOption(proposalID, memberID int64, merchantID, merchantName, proposerName string, feeWei int64, useTicket bool) (*models.ProposalOption, error) {
 	ctx := context.Background()
 	var option postgresProposalOptionModel
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		actualTokenCost := tokenCost
 		var member postgresMemberModel
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&member, "id = ?", memberID).Error; err != nil {
 			return err
@@ -972,31 +1181,37 @@ func (s *PostgresStore) InsertProposalOption(proposalID, memberID int64, merchan
 			if err := tx.Model(&postgresMemberModel{}).Where("id = ? AND proposal_ticket_count > 0", memberID).Update("proposal_ticket_count", gorm.Expr("proposal_ticket_count - 1")).Error; err != nil {
 				return err
 			}
-			actualTokenCost = 0
 			usedProposalTicket = true
-		} else {
-			res := tx.Model(&postgresMemberModel{}).Where("id = ? AND token_balance >= ?", memberID, tokenCost).Update("token_balance", gorm.Expr("token_balance - ?", tokenCost))
-			if res.Error != nil {
-				return res.Error
-			}
-			if res.RowsAffected == 0 {
-				return errors.New("insufficient token balance")
-			}
 		}
-		option = postgresProposalOptionModel{ProposalID: proposalID, MerchantID: merchantID, MerchantName: merchantName, ProposerMemberID: memberID, ProposerName: proposerName, UsedProposalTicket: usedProposalTicket, WeightedVotes: 0, TokenStake: actualTokenCost, CreatedAt: time.Now().UTC()}
+		actualFee := feeWei
+		if usedProposalTicket {
+			actualFee = 0
+		}
+		option = postgresProposalOptionModel{
+			ProposalID:         proposalID,
+			MerchantID:         merchantID,
+			MerchantName:       merchantName,
+			ProposerMemberID:   memberID,
+			ProposerName:       proposerName,
+			UsedProposalTicket: usedProposalTicket,
+			ProposalFeePaidWei: actualFee,
+			WeightedVotes:      0,
+			TokenStake:         actualFee,
+			CreatedAt:          time.Now().UTC(),
+		}
 		if err := tx.Create(&option).Error; err != nil {
 			if isDuplicateKeyError(err) {
 				return ErrDuplicateOption
 			}
 			return err
 		}
-		assetType := "token"
-		amount := fmt.Sprintf("%d", tokenCost)
-		note := "提名候選店家"
-		if actualTokenCost == 0 {
-			assetType = "proposal_ticket"
+		assetType := "proposal_fee"
+		amount := fmt.Sprintf("%d", feeWei)
+		note := "提案店家費用"
+		if actualFee == 0 {
+			assetType = "proposal_coupon"
 			amount = "1"
-			note = "提名候選店家（提案券抵用）"
+			note = "提案店家費用（提案券抵用）"
 		}
 		return s.logUsageTxGorm(ctx, tx, memberID, proposalID, "add_option", assetType, "debit", amount, note, fmt.Sprintf("option:%d", option.ID))
 	})
@@ -1015,26 +1230,14 @@ func (s *PostgresStore) InsertProposalOption(proposalID, memberID int64, merchan
 	return nil, errors.New("created option not found")
 }
 
-func (s *PostgresStore) RecordVote(proposalID, memberID, optionID int64, tokenAmount int64, memberDisplayName string, useTicket bool) error {
+func (s *PostgresStore) RecordVote(proposalID, memberID, optionID int64, voteCount, feeAmountWei int64, memberDisplayName string, useTicket bool) error {
 	ctx := context.Background()
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing postgresVoteModel
-		hasExisting := tx.Where("proposal_id = ? AND member_id = ?", proposalID, memberID).First(&existing).Error == nil
-		if hasExisting {
-			if existing.UseVoteTicket {
-				if err := tx.Model(&postgresMemberModel{}).Where("id = ?", memberID).Update("vote_ticket_count", gorm.Expr("vote_ticket_count + 1")).Error; err != nil {
-					return err
-				}
-			} else if existing.TokenAmount > 0 {
-				if err := tx.Model(&postgresMemberModel{}).Where("id = ?", memberID).Update("token_balance", gorm.Expr("token_balance + ?", existing.TokenAmount)).Error; err != nil {
-					return err
-				}
-			}
-			if err := tx.Model(&postgresProposalOptionModel{}).Where("id = ?", existing.OptionID).Update("weighted_votes", gorm.Expr("weighted_votes - ?", existing.VoteWeight)).Error; err != nil {
-				return err
-			}
+		if err := tx.Where("proposal_id = ? AND member_id = ?", proposalID, memberID).First(&existing).Error; err == nil {
+			return ErrDuplicateVote
 		}
-
+		actualFee := feeAmountWei
 		if useTicket {
 			res := tx.Model(&postgresMemberModel{}).Where("id = ? AND vote_ticket_count > 0", memberID).Update("vote_ticket_count", gorm.Expr("vote_ticket_count - 1"))
 			if res.Error != nil {
@@ -1043,44 +1246,42 @@ func (s *PostgresStore) RecordVote(proposalID, memberID, optionID int64, tokenAm
 			if res.RowsAffected == 0 {
 				return errors.New("目前沒有可用的投票券")
 			}
-			tokenAmount = 1
-		} else {
-			res := tx.Model(&postgresMemberModel{}).Where("id = ? AND token_balance >= ?", memberID, tokenAmount).Update("token_balance", gorm.Expr("token_balance - ?", tokenAmount))
-			if res.Error != nil {
-				return res.Error
-			}
-			if res.RowsAffected == 0 {
-				return errors.New("insufficient token balance")
-			}
 		}
-		if err := tx.Model(&postgresProposalOptionModel{}).Where("id = ?", optionID).Update("weighted_votes", gorm.Expr("weighted_votes + ?", tokenAmount)).Error; err != nil {
+		if err := tx.Model(&postgresProposalOptionModel{}).Where("id = ?", optionID).Updates(map[string]any{
+			"weighted_votes":        gorm.Expr("weighted_votes + ?", voteCount),
+			"vote_fee_collected_wei": gorm.Expr("vote_fee_collected_wei + ?", actualFee),
+		}).Error; err != nil {
 			return err
 		}
-		if hasExisting {
-			if err := tx.Model(&postgresVoteModel{}).Where("id = ?", existing.ID).Updates(map[string]any{
-				"option_id":       optionID,
-				"token_amount":    tokenAmount,
-				"vote_weight":     tokenAmount,
-				"use_vote_ticket": useTicket,
-				"submitted_at":    time.Now().UTC(),
-			}).Error; err != nil {
-				return err
+		if err := tx.Create(&postgresVoteModel{
+			ProposalID:    proposalID,
+			MemberID:      memberID,
+			MemberName:    memberDisplayName,
+			OptionID:      optionID,
+			TokenAmount:   actualFee,
+			FeeAmountWei:  actualFee,
+			VoteWeight:    voteCount,
+			VoteCount:     voteCount,
+			UseVoteTicket: useTicket,
+			SubmittedAt:   time.Now().UTC(),
+			WalletHidden:  true,
+		}).Error; err != nil {
+			if isDuplicateKeyError(err) {
+				return ErrDuplicateVote
 			}
-		} else {
-			if err := tx.Create(&postgresVoteModel{ProposalID: proposalID, MemberID: memberID, MemberName: memberDisplayName, OptionID: optionID, TokenAmount: tokenAmount, VoteWeight: tokenAmount, UseVoteTicket: useTicket, SubmittedAt: time.Now().UTC(), WalletHidden: true}).Error; err != nil {
-				if isDuplicateKeyError(err) {
-					return ErrDuplicateVote
-				}
-				return err
-			}
+			return err
 		}
-		assetType := "token"
-		note := "投票加權"
+		assetType := "vote_fee"
+		note := "投票費用"
 		if useTicket {
-			assetType = "vote_ticket"
-			note = "投票（投票券抵用）"
+			assetType = "vote_coupon"
+			note = "投票費用（投票券抵用 1 票）"
 		}
-		return s.logUsageTxGorm(ctx, tx, memberID, proposalID, "vote", assetType, "debit", fmt.Sprintf("%d", tokenAmount), note, fmt.Sprintf("option:%d", optionID))
+		amount := fmt.Sprintf("%d", actualFee)
+		if useTicket {
+			amount = "1"
+		}
+		return s.logUsageTxGorm(ctx, tx, memberID, proposalID, "vote", assetType, "debit", amount, note, fmt.Sprintf("option:%d", optionID))
 	})
 }
 
@@ -1106,7 +1307,7 @@ func (s *PostgresStore) ApplySettlementRewards(proposalID int64, rewards []Membe
 	})
 }
 
-func (s *PostgresStore) SaveOrder(proposalID, memberID int64, quote *models.OrderQuote, sig *models.OrderSignature, memberDisplayName string) (*models.Order, error) {
+func (s *PostgresStore) SaveOrder(proposalID, memberID int64, quote *models.OrderQuote, sig *models.OrderSignature, memberDisplayName string, escrowOrderID *int64) (*models.Order, error) {
 	ctx := context.Background()
 	var order postgresOrderModel
 	var items []*models.OrderItem
@@ -1126,6 +1327,7 @@ func (s *PostgresStore) SaveOrder(proposalID, memberID int64, quote *models.Orde
 			MemberID:           memberID,
 			MemberName:         memberDisplayName,
 			MerchantID:         quote.MerchantID,
+			EscrowOrderID:      escrowOrderID,
 			OrderHash:          sig.OrderHash,
 			AmountWei:          sig.AmountWei,
 			Status:             status,
@@ -1168,6 +1370,7 @@ func (s *PostgresStore) SaveOrder(proposalID, memberID int64, quote *models.Orde
 	result := &models.Order{
 		ID:                    order.ID,
 		ProposalID:            order.ProposalID,
+		EscrowOrderID:         order.EscrowOrderID,
 		Title:                 s.proposalTitleByID(ctx, order.ProposalID),
 		MemberID:              order.MemberID,
 		MemberName:            order.MemberName,
@@ -1230,6 +1433,7 @@ func (s *PostgresStore) ListMemberOrders(memberID int64) ([]*models.Order, error
 		orders = append(orders, &models.Order{
 			ID:                    row.ID,
 			ProposalID:            row.ProposalID,
+			EscrowOrderID:         row.EscrowOrderID,
 			Title:                 title,
 			MemberID:              row.MemberID,
 			MemberName:            row.MemberName,
@@ -2112,6 +2316,7 @@ func (s *PostgresStore) ListMerchantOrders(merchantID string) ([]*models.Order, 
 		items = append(items, &models.Order{
 			ID:                    row.ID,
 			ProposalID:            row.ProposalID,
+			EscrowOrderID:         row.EscrowOrderID,
 			Title:                 title,
 			MemberID:              row.MemberID,
 			MemberName:            row.MemberName,
@@ -2322,6 +2527,7 @@ func (s *PostgresStore) AdminDashboard() (*models.AdminDashboard, error) {
 	var payoutRows []struct {
 		ID            int64
 		ProposalID    int64
+		EscrowOrderID *int64
 		MemberName    string
 		MerchantID    string
 		MerchantName  string
@@ -2332,7 +2538,7 @@ func (s *PostgresStore) AdminDashboard() (*models.AdminDashboard, error) {
 	}
 	if err := s.db.WithContext(ctx).
 		Table("orders AS o").
-		Select("o.id, o.proposal_id, o.member_name, o.merchant_id, m.name AS merchant_name, m.payout_address, o.amount_wei, o.status, o.created_at").
+		Select("o.id, o.proposal_id, o.escrow_order_id, o.member_name, o.merchant_id, m.name AS merchant_name, m.payout_address, o.amount_wei, o.status, o.created_at").
 		Joins("JOIN merchants AS m ON m.id = o.merchant_id").
 		Where("o.status = ?", "ready_for_payout").
 		Order("o.created_at ASC").
@@ -2344,6 +2550,8 @@ func (s *PostgresStore) AdminDashboard() (*models.AdminDashboard, error) {
 		readyPayoutOrders = append(readyPayoutOrders, &models.ReadyPayoutOrder{
 			OrderID:               row.ID,
 			ProposalID:            row.ProposalID,
+			EscrowOrderID:         row.EscrowOrderID,
+			Title:                 s.proposalTitleByID(ctx, row.ProposalID),
 			MemberName:            row.MemberName,
 			MerchantID:            row.MerchantID,
 			MerchantName:          row.MerchantName,
@@ -2352,6 +2560,10 @@ func (s *PostgresStore) AdminDashboard() (*models.AdminDashboard, error) {
 			Status:                row.Status,
 			CreatedAt:             row.CreatedAt.UTC(),
 		})
+	}
+	params, err := s.GovernanceParams()
+	if err != nil {
+		return nil, err
 	}
 	return &models.AdminDashboard{
 		MemberCount:            memberCount,
@@ -2363,6 +2575,7 @@ func (s *PostgresStore) AdminDashboard() (*models.AdminDashboard, error) {
 		PendingMenuReviews:     pendingMenuReviews,
 		PendingMerchantDelists: pendingMerchantDelists,
 		PlatformTreasury:       s.ContractInfo().PlatformTreasury,
+		GovernanceParams:       params,
 		MenuChangeRequests:     requests,
 		MerchantDelistRequests: delistRequests,
 		ReadyPayoutOrders:      readyPayoutOrders,
@@ -2993,7 +3206,13 @@ func (s *PostgresStore) ListMemberGroups(memberID int64) ([]*models.Group, error
 		return nil, err
 	}
 	var rows []postgresGroupModel
-	if err := s.db.WithContext(ctx).Table("groups").Select("groups.*").Joins("JOIN group_memberships gm ON gm.group_id = groups.id").Where("gm.member_id = ?", memberID).Order("groups.created_at DESC").Scan(&rows).Error; err != nil {
+	if err := s.db.WithContext(ctx).
+		Table("groups").
+		Select("DISTINCT groups.*").
+		Joins("LEFT JOIN group_memberships gm ON gm.group_id = groups.id").
+		Where("gm.member_id = ? OR groups.owner_member_id = ?", memberID, memberID).
+		Order("groups.created_at DESC").
+		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
 	items := make([]*models.Group, 0, len(rows))
@@ -3002,7 +3221,16 @@ func (s *PostgresStore) ListMemberGroups(memberID int64) ([]*models.Group, error
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, &models.Group{ID: row.ID, Name: row.Name, Description: row.Description, OwnerMemberID: row.OwnerMemberID, CreatedAt: row.CreatedAt.UTC().Format(time.RFC3339), Members: members})
+		inviteCode, _ := s.latestGroupInviteCode(ctx, row.ID)
+		items = append(items, &models.Group{
+			ID:            row.ID,
+			Name:          row.Name,
+			Description:   row.Description,
+			OwnerMemberID: row.OwnerMemberID,
+			CreatedAt:     row.CreatedAt.UTC().Format(time.RFC3339),
+			InviteCode:    inviteCode,
+			Members:       members,
+		})
 	}
 	return items, nil
 }
@@ -3177,7 +3405,29 @@ func (s *PostgresStore) memberByQuery(apply func(*gorm.DB) *gorm.DB) (*models.Me
 }
 
 func (s *PostgresStore) memberFromModel(member *postgresMemberModel) *models.Member {
-	result := &models.Member{ID: member.ID, Email: member.Email, PasswordHash: member.PasswordHash, DisplayName: member.DisplayName, AvatarURL: member.AvatarURL, IsAdmin: member.IsAdmin, Points: member.Points, TokenBalance: member.TokenBalance, ProposalTicketCount: member.ProposalTicketCount, VoteTicketCount: member.VoteTicketCount, CreateOrderTicketCount: member.CreateOrderTicketCount, ClaimableProposalTickets: member.ClaimableProposalTickets, ClaimableVoteTickets: member.ClaimableVoteTickets, ClaimableCreateOrderTickets: member.ClaimableCreateOrderTickets, CreatedAt: member.CreatedAt.UTC()}
+	result := &models.Member{
+		ID:                         member.ID,
+		Email:                      member.Email,
+		PasswordHash:               member.PasswordHash,
+		DisplayName:                member.DisplayName,
+		AvatarURL:                  member.AvatarURL,
+		IsAdmin:                    member.IsAdmin,
+		Points:                     member.Points,
+		TokenBalance:               member.TokenBalance,
+		ProposalTicketCount:        member.ProposalTicketCount,
+		VoteTicketCount:            member.VoteTicketCount,
+		CreateOrderTicketCount:     member.CreateOrderTicketCount,
+		ProposalCouponCount:        member.ProposalTicketCount,
+		VoteCouponCount:            member.VoteTicketCount,
+		CreateOrderCouponCount:     member.CreateOrderTicketCount,
+		ClaimableProposalTickets:   member.ClaimableProposalTickets,
+		ClaimableVoteTickets:       member.ClaimableVoteTickets,
+		ClaimableCreateOrderTickets: member.ClaimableCreateOrderTickets,
+		ClaimableProposalCoupons:   member.ClaimableProposalTickets,
+		ClaimableVoteCoupons:       member.ClaimableVoteTickets,
+		ClaimableCreateOrderCoupons: member.ClaimableCreateOrderTickets,
+		CreatedAt:                  member.CreatedAt.UTC(),
+	}
 	if member.WalletAddress != nil {
 		result.WalletAddress = *member.WalletAddress
 	}
@@ -3236,7 +3486,19 @@ func (s *PostgresStore) loadProposal(ctx context.Context, proposalID int64) (*mo
 		}
 		return nil, err
 	}
-	proposal := &models.Proposal{ID: proposalRow.ID, Title: proposalRow.Title, Description: proposalRow.Description, MerchantGroup: proposalRow.MerchantGroup, MealPeriod: proposalRow.MealPeriod, ProposalDate: proposalRow.ProposalDate, MaxOptions: proposalRow.MaxOptions, CreatedBy: proposalRow.CreatedBy, CreatedByName: proposalRow.CreatedByName, ProposalDeadline: proposalRow.ProposalDeadline.UTC(), VoteDeadline: proposalRow.VoteDeadline.UTC(), OrderDeadline: proposalRow.OrderDeadline.UTC(), WinnerOptionID: proposalRow.WinnerOptionID, RewardsApplied: proposalRow.RewardsApplied, CreatedAt: proposalRow.CreatedAt.UTC()}
+	proposal := &models.Proposal{
+		ID: proposalRow.ID, Title: proposalRow.Title, Description: proposalRow.Description, MerchantGroup: proposalRow.MerchantGroup,
+		MealPeriod: proposalRow.MealPeriod, ProposalDate: proposalRow.ProposalDate, MaxOptions: proposalRow.MaxOptions,
+		CreatedBy: proposalRow.CreatedBy, CreatedByName: proposalRow.CreatedByName,
+		ProposalDeadline: proposalRow.ProposalDeadline.UTC(), VoteDeadline: proposalRow.VoteDeadline.UTC(), OrderDeadline: proposalRow.OrderDeadline.UTC(),
+		WinnerOptionID: proposalRow.WinnerOptionID, RewardsApplied: proposalRow.RewardsApplied, CreatedAt: proposalRow.CreatedAt.UTC(),
+		SettledAt: proposalRow.SettledAt, CreateFeeWei: proposalRow.CreateFeeWei, CreateFeeRefundWei: proposalRow.CreateFeeRefundWei,
+		CreateFeePlatformWei: proposalRow.CreateFeePlatformWei, ProposalFeeWei: proposalRow.ProposalFeeWei, VoteFeeWei: proposalRow.VoteFeeWei,
+		WinnerProposalRefundBps: proposalRow.WinnerProposalRefundBps, LoserProposalRefundBps: proposalRow.LoserProposalRefundBps,
+		VoteRefundBps: proposalRow.VoteRefundBps, WinnerBonusBps: proposalRow.WinnerBonusBps, LoserBonusBps: proposalRow.LoserBonusBps,
+		WinnerProposalPoints: proposalRow.WinnerProposalPoints, WinnerVotePointsPerVote: proposalRow.WinnerVotePointsPerVote,
+		UsedCreateOrderCoupon: proposalRow.UsedCreateOrderTicket, FailedReason: proposalRow.FailedReason,
+	}
 	if proposal.ProposalDate == "" {
 		reference := proposal.CreatedAt
 		if reference.IsZero() {
@@ -3267,7 +3529,13 @@ func (s *PostgresStore) loadProposal(ctx context.Context, proposalID int64) (*mo
 		return nil, err
 	}
 	for _, row := range optionRows {
-		option := &models.ProposalOption{ID: row.ID, MerchantID: row.MerchantID, MerchantName: row.MerchantName, ProposerMember: row.ProposerMemberID, ProposerName: row.ProposerName, WeightedVotes: row.WeightedVotes, TokenStake: row.TokenStake, PartialRefund: row.PartialRefund, WinnerTokenBack: row.WinnerTokenBack}
+		option := &models.ProposalOption{
+			ID: row.ID, MerchantID: row.MerchantID, MerchantName: row.MerchantName, ProposerMember: row.ProposerMemberID, ProposerName: row.ProposerName,
+			WeightedVotes: row.WeightedVotes, TokenStake: row.TokenStake, ProposalFeePaidWei: row.ProposalFeePaidWei, VoteFeeCollectedWei: row.VoteFeeCollectedWei,
+			VoteRefundWei: row.VoteRefundWei, ProposerRefundWei: row.ProposerRefundWei, ProposerRewardWei: row.ProposerRewardWei,
+			FirstProposedAt: row.CreatedAt.UTC().Format(time.RFC3339), IsWinner: row.ID == proposal.WinnerOptionID, UsedProposalCoupon: row.UsedProposalTicket,
+			PartialRefund: row.PartialRefund, WinnerTokenBack: row.WinnerTokenBack,
+		}
 		var optionMap postgresProposalOptionChainMapModel
 		if err := s.db.WithContext(ctx).First(&optionMap, "local_option_id = ?", row.ID).Error; err == nil {
 			chainOptionIndex := optionMap.ChainOptionIndex
@@ -3283,7 +3551,11 @@ func (s *PostgresStore) loadProposal(ctx context.Context, proposalID int64) (*mo
 		return nil, err
 	}
 	for _, row := range voteRows {
-		proposal.Votes = append(proposal.Votes, &models.VoteRecord{MemberID: row.MemberID, MemberName: row.MemberName, OptionID: row.OptionID, TokenAmount: row.TokenAmount, VoteWeight: row.VoteWeight, SubmittedAt: row.SubmittedAt.UTC().Format(time.RFC3339), WalletHidden: row.WalletHidden})
+		proposal.Votes = append(proposal.Votes, &models.VoteRecord{
+			MemberID: row.MemberID, MemberName: row.MemberName, OptionID: row.OptionID, TokenAmount: row.TokenAmount, FeeAmountWei: row.FeeAmountWei,
+			VoteWeight: row.VoteWeight, VoteCount: row.VoteCount, RefundWei: row.RefundWei, SubmittedAt: row.SubmittedAt.UTC().Format(time.RFC3339),
+			WalletHidden: row.WalletHidden, UseVoteTicket: row.UseVoteTicket, UseVoteCoupon: row.UseVoteTicket,
+		})
 	}
 	var orderRows []postgresOrderModel
 	if err := s.db.WithContext(ctx).Where("proposal_id = ?", proposalID).Order("id ASC").Find(&orderRows).Error; err != nil {
@@ -3341,6 +3613,11 @@ func (s *PostgresStore) loadProposal(ctx context.Context, proposalID int64) (*mo
 	}
 	proposal.OrderTotalWei = sumProposalOrderAmounts(proposal.Orders)
 	proposal.OrderMemberCount = countCountedOrders(proposal.Orders)
+	for _, vote := range proposal.Votes {
+		if vote != nil {
+			proposal.TotalVoteCount += vote.VoteCount
+		}
+	}
 	return proposal, nil
 }
 
@@ -3366,6 +3643,13 @@ func (s *PostgresStore) refreshProposalState(ctx context.Context, proposalID int
 
 		voteEnd := proposal.VoteDeadline.UTC()
 		if isCurrentProposalDay(proposal.ProposalDate) && proposal.WinnerOptionID == 0 && !time.Now().UTC().Before(voteEnd) && optCount > 0 {
+			var totalVotes int64
+			if err := tx.Model(&postgresVoteModel{}).Where("proposal_id = ?", proposalID).Select("COALESCE(SUM(vote_count), 0)").Scan(&totalVotes).Error; err != nil {
+				return err
+			}
+			if totalVotes == 0 {
+				proposal.WinnerOptionID = 0
+			} else {
 			var winner postgresProposalOptionModel
 			if err := tx.Where("proposal_id = ?", proposalID).Order("weighted_votes DESC, id ASC").First(&winner).Error; err != nil {
 				if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -3377,6 +3661,7 @@ func (s *PostgresStore) refreshProposalState(ctx context.Context, proposalID int
 				return err
 			}
 			proposal.WinnerOptionID = winner.ID
+			}
 		}
 
 		propView := &models.Proposal{
@@ -3408,68 +3693,100 @@ func (s *PostgresStore) applyLocalSettlementRewards(ctx context.Context, proposa
 		return nil
 	}
 
-	var rewards []MemberReward
-	var optionRefunds []OptionRefund
-	for _, opt := range proposal.Options {
-		if opt == nil {
-			continue
-		}
-		if opt.ID == proposal.WinnerOptionID {
-			rewards = append(rewards, MemberReward{
-				MemberID: opt.ProposerMember,
-				Points:   autoWinnerProposerPoints,
-				Tokens:   autoWinnerTokenReward,
-			})
-			optionRefunds = append(optionRefunds, OptionRefund{
-				OptionID:        opt.ID,
-				WinnerTokenBack: autoWinnerTokenReward,
-			})
-			continue
-		}
-		rewards = append(rewards, MemberReward{
-			MemberID: opt.ProposerMember,
-			Tokens:   autoLoserPartialRefund,
-		})
-		optionRefunds = append(optionRefunds, OptionRefund{
-			OptionID:      opt.ID,
-			PartialRefund: autoLoserPartialRefund,
-		})
-	}
-
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		var voterIDs []int64
-		if err := tx.Model(&postgresVoteModel{}).Where("proposal_id = ?", proposalID).Distinct("member_id").Pluck("member_id", &voterIDs).Error; err != nil {
+		if proposal.TotalVoteCount == 0 {
+			return tx.Model(&postgresProposalModel{}).Where("id = ?", proposalID).Updates(map[string]any{
+				"rewards_applied":        true,
+				"settled_at":             time.Now().UTC(),
+				"create_fee_platform_wei": proposal.CreateFeeWei,
+				"failed_reason":          "no_votes_cast",
+			}).Error
+		}
+
+		if err := tx.Model(&postgresProposalModel{}).Where("id = ?", proposalID).Update("create_fee_refund_wei", proposal.CreateFeeWei).Error; err != nil {
 			return err
 		}
-		for _, memberID := range voterIDs {
-			rewards = append(rewards, MemberReward{
-				MemberID: memberID,
-				Points:   autoVoterPoints,
-			})
+		if err := s.logUsageTxGorm(ctx, tx, proposal.CreatedBy, proposalID, "create_fee_refund", "create_order_fee", "credit", fmt.Sprintf("%d", proposal.CreateFeeWei), "成功成立訂單後退回建立費", ""); err != nil {
+			return err
 		}
 
-		for _, reward := range rewards {
-			if err := tx.Model(&postgresMemberModel{}).Where("id = ?", reward.MemberID).Updates(map[string]any{
-				"points":        gorm.Expr("points + ?", reward.Points),
-				"token_balance": gorm.Expr("token_balance + ?", reward.Tokens),
+		for _, opt := range proposal.Options {
+			if opt == nil {
+				continue
+			}
+			voteRefundWei := (opt.VoteFeeCollectedWei * proposal.VoteRefundBps) / 10000
+			proposerRefundWei := int64(0)
+			proposerRewardWei := int64(0)
+			proposerPoints := int64(0)
+			if opt.ID == proposal.WinnerOptionID {
+				proposerRefundWei = (opt.ProposalFeePaidWei * proposal.WinnerProposalRefundBps) / 10000
+				proposerRewardWei = ((opt.VoteFeeCollectedWei - voteRefundWei) * proposal.WinnerBonusBps) / 10000
+				proposerPoints = proposal.WinnerProposalPoints
+			} else {
+				proposerRefundWei = (opt.ProposalFeePaidWei * proposal.LoserProposalRefundBps) / 10000
+				proposerRewardWei = ((opt.VoteFeeCollectedWei - voteRefundWei) * proposal.LoserBonusBps) / 10000
+			}
+			if err := tx.Model(&postgresProposalOptionModel{}).Where("id = ?", opt.ID).Updates(map[string]any{
+				"vote_refund_wei":      voteRefundWei,
+				"proposer_refund_wei":  proposerRefundWei,
+				"proposer_reward_wei":  proposerRewardWei,
+				"partial_refund":       proposerRefundWei,
+				"winner_token_back":    proposerRewardWei,
 			}).Error; err != nil {
 				return err
 			}
-			if reward.Tokens > 0 {
-				if err := s.logUsageTxGorm(ctx, tx, reward.MemberID, proposalID, "settlement_reward", "token", "credit", fmt.Sprintf("%d", reward.Tokens), "自動結算獎勵", ""); err != nil {
+			if proposerPoints > 0 {
+				if err := tx.Model(&postgresMemberModel{}).Where("id = ?", opt.ProposerMember).Update("points", gorm.Expr("points + ?", proposerPoints)).Error; err != nil {
+					return err
+				}
+			}
+			if proposerRefundWei > 0 {
+				if err := s.logUsageTxGorm(ctx, tx, opt.ProposerMember, proposalID, "proposal_refund", "proposal_fee", "credit", fmt.Sprintf("%d", proposerRefundWei), "提案退款", fmt.Sprintf("option:%d", opt.ID)); err != nil {
+					return err
+				}
+			}
+			if proposerRewardWei > 0 {
+				action := "loser_proposer_bonus"
+				note := "落選提案安慰獎"
+				if opt.ID == proposal.WinnerOptionID {
+					action = "winner_proposer_bonus"
+					note = "優勝提案獎勵"
+				}
+				if err := s.logUsageTxGorm(ctx, tx, opt.ProposerMember, proposalID, action, "proposal_fee", "credit", fmt.Sprintf("%d", proposerRewardWei), note, fmt.Sprintf("option:%d", opt.ID)); err != nil {
 					return err
 				}
 			}
 		}
-		for _, refund := range optionRefunds {
-			if err := tx.Model(&postgresProposalOptionModel{}).Where("id = ?", refund.OptionID).Updates(map[string]any{
-				"partial_refund":    refund.PartialRefund,
-				"winner_token_back": refund.WinnerTokenBack,
-			}).Error; err != nil {
+
+		var voteRows []postgresVoteModel
+		if err := tx.Where("proposal_id = ?", proposalID).Find(&voteRows).Error; err != nil {
+			return err
+		}
+		for _, vote := range voteRows {
+			refundWei := (vote.FeeAmountWei * proposal.VoteRefundBps) / 10000
+			points := int64(0)
+			if vote.OptionID == proposal.WinnerOptionID {
+				points = vote.VoteCount * proposal.WinnerVotePointsPerVote
+			}
+			if err := tx.Model(&postgresVoteModel{}).Where("id = ?", vote.ID).Update("refund_wei", refundWei).Error; err != nil {
 				return err
 			}
+			if points > 0 {
+				if err := tx.Model(&postgresMemberModel{}).Where("id = ?", vote.MemberID).Update("points", gorm.Expr("points + ?", points)).Error; err != nil {
+					return err
+				}
+			}
+			if refundWei > 0 {
+				if err := s.logUsageTxGorm(ctx, tx, vote.MemberID, proposalID, "vote_refund", "vote_fee", "credit", fmt.Sprintf("%d", refundWei), "投票退款", fmt.Sprintf("option:%d", vote.OptionID)); err != nil {
+					return err
+				}
+			}
 		}
-		return tx.Model(&postgresProposalModel{}).Where("id = ?", proposalID).Update("rewards_applied", true).Error
+
+		return tx.Model(&postgresProposalModel{}).Where("id = ?", proposalID).Updates(map[string]any{
+			"rewards_applied": true,
+			"settled_at":      time.Now().UTC(),
+		}).Error
 	})
 }
 
@@ -4013,15 +4330,16 @@ func (s *PostgresStore) seedDemoData() error {
 		now.Add(30*time.Minute),
 		now.Add(75*time.Minute),
 		now.Add(135*time.Minute),
+		defaultGovernanceParams(),
 	)
 	if err != nil {
 		return err
 	}
 
-	if _, err := s.InsertProposalOption(proposal.ID, aliceID, "shop-hotpot", "湯潮火鍋", "Alice", 10, false); err != nil {
+	if _, err := s.InsertProposalOption(proposal.ID, aliceID, "shop-hotpot", "湯潮火鍋", "Alice", defaultProposalFeeWei, false); err != nil {
 		return err
 	}
-	if _, err := s.InsertProposalOption(proposal.ID, bobID, "shop-bento", "午間便當室", "Bob", 10, false); err != nil {
+	if _, err := s.InsertProposalOption(proposal.ID, bobID, "shop-bento", "午間便當室", "Bob", defaultProposalFeeWei, false); err != nil {
 		return err
 	}
 	return nil

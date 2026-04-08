@@ -167,7 +167,7 @@ export function AdminMetrics() {
           ["oldest", "依建立時間舊到新"],
           ["name", "依名稱排序"],
           ["points_desc", "依積分高到低"],
-          ["token_desc", "依 Token 高到低"],
+          ["token_desc", "依平台 Token 高到低"],
           ["id_desc", "依 ID 大到小"],
           ["id_asc", "依 ID 小到大"]
         ]
@@ -271,7 +271,7 @@ export function AdminMetrics() {
                   <div className="text-right text-sm text-muted-foreground">
                     <p>{member.isAdmin ? "管理者" : "一般會員"}</p>
                     <p className="mt-1">{member.subscriptionActive ? "已訂閱" : "未訂閱"}</p>
-                    <p className="mt-1">Token {member.tokenBalance} / Points {member.points}</p>
+                    <p className="mt-1">平台 Token {member.tokenBalance} / Points {member.points}</p>
                   </div>
                 </div>
               </div>

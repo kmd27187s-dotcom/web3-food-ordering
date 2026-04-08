@@ -371,6 +371,29 @@ func (s *Server) handleAdminUpdatePlatformTreasury(w http.ResponseWriter, r *htt
 	writeJSON(w, http.StatusOK, info)
 }
 
+func (s *Server) handleAdminGetPlatformParams(w http.ResponseWriter, r *http.Request, memberID int64) {
+	params, err := s.chainRepo.GovernanceParams()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, params)
+}
+
+func (s *Server) handleAdminUpdatePlatformParams(w http.ResponseWriter, r *http.Request, memberID int64) {
+	var params models.GovernanceParams
+	if err := json.NewDecoder(r.Body).Decode(&params); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	updated, err := s.chainRepo.SetGovernanceParams(&params)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, updated)
+}
+
 func (s *Server) handleAdminMenuChanges(w http.ResponseWriter, r *http.Request, memberID int64) {
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
 	items, err := s.merchantRepo.ListMenuChangeRequests("", status)

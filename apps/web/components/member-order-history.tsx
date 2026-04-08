@@ -3,18 +3,22 @@
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { confirmMemberOrder, fetchMyOrderHistory, type MemberOrderHistory } from "@/lib/api";
+import { confirmMemberOrder, fetchContractInfo, fetchMyOrderHistory, type ContractInfo, type MemberOrderHistory } from "@/lib/api";
+import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress } from "@/lib/chain";
 import { OrderSummaryCard } from "@/components/member-order-shared";
 
 export function MemberOrderHistoryView() {
   const [history, setHistory] = useState<MemberOrderHistory | null>(null);
+  const [contractInfo, setContractInfo] = useState<ContractInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [sortBy, setSortBy] = useState("newest");
 
   async function refresh() {
-    setHistory(await fetchMyOrderHistory());
+    const [nextHistory, contract] = await Promise.all([fetchMyOrderHistory(), fetchContractInfo().catch(() => null)]);
+    setHistory(nextHistory);
+    setContractInfo(contract);
   }
 
   useEffect(() => {
@@ -26,6 +30,19 @@ export function MemberOrderHistoryView() {
   async function handleConfirm(orderId: number) {
     setPending(true);
     try {
+      const order = history?.orders.find((item) => item.id === orderId);
+      if (order?.escrowOrderId && isUsableContractAddress(contractInfo?.orderEscrowContract)) {
+        const { walletClient, publicClient, account } = await ensureSepoliaClients();
+        const txHash = await walletClient.writeContract({
+          address: contractInfo!.orderEscrowContract as `0x${string}`,
+          abi: ESCROW_ABI,
+          functionName: "memberConfirmReceived",
+          args: [BigInt(order.escrowOrderId)],
+          account,
+          chain: walletClient.chain
+        });
+        await publicClient.waitForTransactionReceipt({ hash: txHash });
+      }
       await confirmMemberOrder(orderId);
       await refresh();
       setMessage("已確認接收訂單。");

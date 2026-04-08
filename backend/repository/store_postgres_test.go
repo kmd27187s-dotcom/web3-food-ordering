@@ -318,6 +318,7 @@ func TestAdvanceProposalStageStoresRFC3339Timestamps(t *testing.T) {
 		now.Add(15*time.Minute),
 		now.Add(45*time.Minute),
 		now.Add(75*time.Minute),
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
@@ -353,11 +354,12 @@ func TestLocalProposalAwaitingSettlementIncludesRoundOrderTotals(t *testing.T) {
 		now.Add(-90*time.Minute),
 		now.Add(-60*time.Minute),
 		now.Add(-10*time.Minute),
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}
-	option, err := s.InsertProposalOption(proposal.ID, aliceID, "shop-hotpot", "湯潮火鍋", "Alice", 0)
+	option, err := s.InsertProposalOption(proposal.ID, aliceID, "shop-hotpot", "湯潮火鍋", "Alice", 0, false)
 	if err != nil {
 		t.Fatalf("insert option: %v", err)
 	}
@@ -375,7 +377,7 @@ func TestLocalProposalAwaitingSettlementIncludesRoundOrderTotals(t *testing.T) {
 	}, &models.OrderSignature{
 		OrderHash: "local-order-a",
 		AmountWei: "4200000000000000",
-	}, "Alice"); err != nil {
+	}, "Alice", nil); err != nil {
 		t.Fatalf("save first order: %v", err)
 	}
 	if _, err := s.SaveOrder(proposal.ID, aliceID, &models.OrderQuote{
@@ -389,7 +391,7 @@ func TestLocalProposalAwaitingSettlementIncludesRoundOrderTotals(t *testing.T) {
 	}, &models.OrderSignature{
 		OrderHash: "local-order-b",
 		AmountWei: "900000000000000",
-	}, "Alice"); err != nil {
+	}, "Alice", nil); err != nil {
 		t.Fatalf("save second order: %v", err)
 	}
 
@@ -426,15 +428,16 @@ func TestLocalProposalAutoSettlesAfterOrderingDeadline(t *testing.T) {
 		now.Add(-3*time.Hour),
 		now.Add(-2*time.Hour),
 		now.Add(-90*time.Minute),
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("create proposal: %v", err)
 	}
-	option, err := s.InsertProposalOption(proposal.ID, aliceID, "shop-hotpot", "湯潮火鍋", "Alice", 0)
+	option, err := s.InsertProposalOption(proposal.ID, aliceID, "shop-hotpot", "湯潮火鍋", "Alice", 0, false)
 	if err != nil {
 		t.Fatalf("insert option: %v", err)
 	}
-	if err := s.RecordVote(proposal.ID, bobID, option.ID, 3, "Bob"); err != nil {
+	if err := s.RecordVote(proposal.ID, bobID, option.ID, 3, 3, "Bob", false); err != nil {
 		t.Fatalf("record vote: %v", err)
 	}
 	if err := s.db.WithContext(context.Background()).Exec(`UPDATE proposals SET winner_option_id = ? WHERE id = ?`, option.ID, proposal.ID).Error; err != nil {

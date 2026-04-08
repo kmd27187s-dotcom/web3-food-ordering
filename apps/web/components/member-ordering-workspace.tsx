@@ -16,12 +16,14 @@ import {
   fetchMe,
   fetchMerchant,
   fetchMerchants,
+  fetchPublicGovernanceParams,
   fetchProposals,
   finalizeOrder,
   quoteVote,
   registerPendingTransaction,
   signOrder,
   type ContractInfo,
+  type GovernanceParams,
   type Group,
   type Member,
   type Merchant,
@@ -30,7 +32,20 @@ import {
   type VoteRecord,
   voteProposal
 } from "@/lib/api";
-import { ensureSepoliaWallet, getWalletBalanceWei, isUsableContractAddress, ORDER_ABI } from "@/lib/chain";
+import {
+  ESCROW_ABI,
+  ensureSepoliaClients,
+  ensureSepoliaWallet,
+  getWalletBalanceWei,
+  GOVERNANCE_ABI,
+  isUsableContractAddress,
+  ORDER_ABI,
+  toStableKey,
+  toTextHash,
+  waitForEscrowOpened,
+  waitForGovernanceCandidateCreated,
+  waitForGovernanceRoundCreated
+} from "@/lib/chain";
 import { OrderSummaryCard } from "@/components/member-order-shared";
 
 type Stage = "create" | "proposal" | "voting" | "ordering" | "submitted";
@@ -42,7 +57,7 @@ type CreateDraft = {
   proposalMinutes: string;
   voteMinutes: string;
   orderMinutes: string;
-  merchantId: string;
+  merchantIds: string[];
 };
 
 type WorkspaceState = {
@@ -51,6 +66,7 @@ type WorkspaceState = {
   proposals: Proposal[];
   merchants: Merchant[];
   contractInfo: ContractInfo | null;
+  governanceParams: GovernanceParams | null;
 };
 
 const stageDurationOptions = [1, 10, 20, 30, 40, 50, 60, 70, 80, 90] as const;
@@ -62,14 +78,14 @@ const defaultCreateDraft: CreateDraft = {
   proposalMinutes: "1",
   voteMinutes: "1",
   orderMinutes: "1",
-  merchantId: ""
+  merchantIds: []
 };
 
 type StageSortKey = "newest" | "oldest" | "title" | "options_desc" | "votes_desc" | "orders_desc" | "deadline_soon";
 
 export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; proposalId?: number }) {
   const router = useRouter();
-  const [state, setState] = useState<WorkspaceState>({ member: null, groups: [], proposals: [], merchants: [], contractInfo: null });
+  const [state, setState] = useState<WorkspaceState>({ member: null, groups: [], proposals: [], merchants: [], contractInfo: null, governanceParams: null });
   const [loading, setLoading] = useState(true);
   const [actionPending, setActionPending] = useState(false);
   const [message, setMessage] = useState("");
@@ -80,6 +96,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
   const [optionMerchantQuery, setOptionMerchantQuery] = useState("");
   const [voteTokens, setVoteTokens] = useState("");
   const [useCreateOrderTicket, setUseCreateOrderTicket] = useState(false);
+  const [useInitialProposalTickets, setUseInitialProposalTickets] = useState(false);
   const [useProposalTicket, setUseProposalTicket] = useState(false);
   const [useVoteTicket, setUseVoteTicket] = useState(false);
   const [voteQuoteMessage, setVoteQuoteMessage] = useState("");
@@ -88,20 +105,22 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
   const [stageSort, setStageSort] = useState<StageSortKey>("newest");
 
   const refresh = useCallback(async () => {
-    const [me, groups, proposals, contractInfo, merchants] = await Promise.all([
+    const [me, groups, proposals, contractInfo, merchants, governanceParams] = await Promise.all([
       fetchMe(),
       fetchGroups(),
       fetchProposals(),
       fetchContractInfo().catch(() => null),
-      fetchMerchants().catch(() => [])
+      fetchMerchants().catch(() => []),
+      fetchPublicGovernanceParams().catch(() => null)
     ]);
-    const normalizedProposals = safeArray(proposals).map(normalizeProposal);
+    const normalizedProposals = dedupeProposals(safeArray(proposals).map(normalizeProposal));
     setState({
       member: me,
       groups,
       proposals: normalizedProposals,
       merchants: Array.isArray(merchants) ? merchants : [],
-      contractInfo
+      contractInfo,
+      governanceParams
     });
     setCreateDraft((current) => ({
       ...current,
@@ -114,6 +133,14 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       .catch((error) => setMessage(error instanceof Error ? error.message : "讀取建立訂單資料失敗"))
       .finally(() => setLoading(false));
   }, [refresh]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const flash = window.sessionStorage.getItem("member-ordering-flash");
+    if (!flash) return;
+    setMessage(flash);
+    window.sessionStorage.removeItem("member-ordering-flash");
+  }, []);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000);
@@ -179,27 +206,77 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
 
   async function handleCreateOrder() {
     if (!createDraft.title.trim() || !createDraft.groupId) return;
-    const resolvedMerchantId = resolveMerchantId(createDraft.merchantId, createMerchantQuery, state.merchants);
+    if (createDraft.merchantIds.length === 0 || createDraft.merchantIds.length > 2) {
+      setMessage("建立訂單時請先選擇 1 到 2 間初始提案店家。");
+      return;
+    }
     setActionPending(true);
     setMessage("");
     try {
+      let chainProposalId: number | undefined;
+      const canUseGovernanceChain = isUsableContractAddress(state.contractInfo?.governanceContract);
+      const initialProposalTicketFlags =
+        useInitialProposalTickets && (state.member?.proposalCouponCount || 0) > 0
+          ? createDraft.merchantIds.map((_, index) => index < (state.member?.proposalCouponCount || 0))
+          : createDraft.merchantIds.map(() => false);
+
+      if (canUseGovernanceChain) {
+        if (!state.governanceParams) {
+          throw new Error("目前無法讀取治理費率參數，暫時不能送出鏈上建立訂單交易。");
+        }
+        const { walletClient, account } = await ensureSepoliaClients();
+        const createFeeWei = BigInt(useCreateOrderTicket ? 0 : state.governanceParams?.createFeeWei || 0);
+        const initialProposalFeeWei = createDraft.merchantIds.reduce((total, _merchantId, index) => {
+          if (initialProposalTicketFlags[index]) return total;
+          return total + BigInt(state.governanceParams?.proposalFeeWei || 0);
+        }, 0n);
+        const txValueWei = createFeeWei + initialProposalFeeWei;
+        const chainTxHash = await walletClient.writeContract({
+          address: state.contractInfo!.governanceContract as `0x${string}`,
+          abi: GOVERNANCE_ABI,
+          functionName: "createRound",
+          args: [
+            toStableKey("group", createDraft.groupId),
+            toTextHash(createDraft.title.trim()),
+            createDraft.merchantIds.map((merchantId) => toStableKey("merchant", merchantId)) as `0x${string}`[],
+            useCreateOrderTicket,
+            initialProposalTicketFlags
+          ],
+          account,
+          chain: walletClient.chain,
+          value: txValueWei
+        });
+        chainProposalId = await waitForGovernanceRoundCreated(chainTxHash);
+        await registerPendingTransaction({
+          proposalId: 0,
+          action: "create_proposal",
+          txHash: chainTxHash,
+          walletAddress: account
+        }).catch(() => undefined);
+      }
       const proposal = await createProposal({
         title: createDraft.title.trim(),
         description: "",
         maxOptions: Number(createDraft.maxOptions),
-        merchantId: resolvedMerchantId || undefined,
+        merchantIds: createDraft.merchantIds,
+        useInitialProposalTickets: initialProposalTicketFlags,
         proposalMinutes: Number(createDraft.proposalMinutes),
         voteMinutes: Number(createDraft.voteMinutes),
         orderMinutes: Number(createDraft.orderMinutes),
         groupId: Number(createDraft.groupId),
-        useCreateOrderTicket
+        useCreateOrderTicket,
+        chainProposalId
       });
       setCreateDraft((current) => ({ ...defaultCreateDraft, groupId: current.groupId }));
       setCreateMerchantQuery("");
       setUseCreateOrderTicket(false);
-      await refresh();
-      setMessage("已建立新的訂單。");
-      router.push(`/member/ordering/proposals/${proposal.id}`);
+      setUseInitialProposalTickets(false);
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem("member-ordering-flash", `已成功建立訂單「${proposal.title}」。`);
+        window.location.assign("/member/ongoing-orders");
+        return;
+      }
+      router.push("/member/ongoing-orders");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "建立訂單失敗");
     } finally {
@@ -214,7 +291,29 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     setActionPending(true);
     setMessage("");
     try {
-      await addProposalOption(detail.id, merchantId, useProposalTicket);
+      let chainOptionIndex: number | undefined;
+      const canUseGovernanceChain = Boolean(detail.chainProposalId) && isUsableContractAddress(state.contractInfo?.governanceContract);
+      if (canUseGovernanceChain && detail.chainProposalId) {
+        const { walletClient, account } = await ensureSepoliaClients();
+        const value = useProposalTicket ? 0n : BigInt(detail.proposalFeeWei || 0);
+        const txHash = await walletClient.writeContract({
+          address: state.contractInfo!.governanceContract as `0x${string}`,
+          abi: GOVERNANCE_ABI,
+          functionName: "proposeMerchant",
+          args: [BigInt(detail.chainProposalId), toStableKey("merchant", merchantId), useProposalTicket],
+          account,
+          chain: walletClient.chain,
+          value
+        });
+        chainOptionIndex = await waitForGovernanceCandidateCreated(txHash);
+        await registerPendingTransaction({
+          proposalId: detail.id,
+          action: "add_option",
+          txHash,
+          walletAddress: account
+        }).catch(() => undefined);
+      }
+      await addProposalOption(detail.id, merchantId, useProposalTicket, chainOptionIndex);
       setOptionMerchantId("");
       setOptionMerchantQuery("");
       setUseProposalTicket(false);
@@ -249,11 +348,11 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
   async function handleVoteQuote() {
     if (!detail || (!voteTokens.trim() && !useVoteTicket)) return;
     try {
+      const quote = await quoteVote(detail.id, Number(voteTokens), useVoteTicket);
       if (useVoteTicket) {
-        setVoteQuoteMessage("使用投票券時，會以 1 張投票券換 1 票，截止前可改票。");
+        setVoteQuoteMessage(`投 ${quote.voteCount} 票會使用 1 張投票優惠券折抵 1 票，仍需支付 ${formatWeiFriendly(quote.feeAmountWei ?? 0)}。`);
       } else {
-        const quote = await quoteVote(detail.id, Number(voteTokens));
-        setVoteQuoteMessage(`投入 ${voteTokens} Token 後，可得到 ${quote.voteWeight} 票重。`);
+        setVoteQuoteMessage(`投 ${quote.voteCount} 票需支付 ${formatWeiFriendly(quote.feeAmountWei ?? 0)}。`);
       }
     } catch (error) {
       setVoteQuoteMessage(error instanceof Error ? error.message : "試算失敗");
@@ -265,14 +364,45 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     setActionPending(true);
     setMessage("");
     try {
+      const option = detail.options.find((item) => item.id === optionId);
+      const voteCount = Number(voteTokens || "0");
+      const canUseGovernanceChain =
+        Boolean(detail.chainProposalId) &&
+        Boolean(option?.chainOptionIndex) &&
+        isUsableContractAddress(state.contractInfo?.governanceContract);
+      if (canUseGovernanceChain && detail.chainProposalId && option?.chainOptionIndex) {
+        const { walletClient, account } = await ensureSepoliaClients();
+        const actualVoteCount = voteCount;
+        const payableVotes = useVoteTicket ? Math.max(actualVoteCount - 1, 0) : actualVoteCount;
+        const value = BigInt((detail.voteFeeWei || 0) * payableVotes);
+        const txHash = await walletClient.writeContract({
+          address: state.contractInfo!.governanceContract as `0x${string}`,
+          abi: GOVERNANCE_ABI,
+          functionName: "castVote",
+          args: [BigInt(detail.chainProposalId), BigInt(option.chainOptionIndex), BigInt(actualVoteCount), useVoteTicket],
+          account,
+          chain: walletClient.chain,
+          value
+        });
+        await registerPendingTransaction({
+          proposalId: detail.id,
+          action: "vote",
+          txHash,
+          walletAddress: account
+        }).catch(() => undefined);
+      }
       await voteProposal(detail.id, optionId, Number(voteTokens || "0"), useVoteTicket);
       await refresh();
-      setMessage("已更新投票。截止前都可以再次更換。");
+      setMessage("已完成投票，付款確認後不可再次修改。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "投票失敗");
     } finally {
       setActionPending(false);
     }
+  }
+
+  function removeInitialMerchantSelection(merchantId: string) {
+    setCreateDraft((current) => ({ ...current, merchantIds: current.merchantIds.filter((id) => id !== merchantId) }));
   }
 
   function setOrderQuantity(menuItemId: string, nextQuantity: number) {
@@ -300,6 +430,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     setMessage("");
     try {
       const result = await signOrder(detail.id, payload);
+      let escrowOrderId: number | undefined;
       const walletClient = await ensureSepoliaWallet();
       const [walletAddress = ""] = await walletClient.getAddresses();
       const requiredBalance = BigInt(result.quote.requiredBalanceWei);
@@ -310,12 +441,64 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
         }
       }
 
-      const canUseChainOrder =
+      const canUseEscrowOrder =
         Boolean(detail.chainProposalId) &&
-        Boolean(result.signature?.signature) &&
-        isUsableContractAddress(state.contractInfo?.orderContract);
+        isUsableContractAddress(state.contractInfo?.orderEscrowContract) &&
+        Boolean(merchant.payoutAddress);
 
-      if (canUseChainOrder && detail.chainProposalId && result.signature) {
+      if (canUseEscrowOrder && detail.chainProposalId) {
+        const { walletClient, account } = await ensureSepoliaClients();
+        const menuSnapshotHash = toTextHash(JSON.stringify(merchant.menu));
+        const orderDetailHash = toTextHash(JSON.stringify({
+          proposalId: detail.id,
+          memberId: state.member?.id,
+          items: payload
+        }));
+        const totalQuantity = Object.values(payload).reduce((sum, quantity) => sum + quantity, 0);
+        const openTxHash = await walletClient.writeContract({
+          address: state.contractInfo!.orderEscrowContract as `0x${string}`,
+          abi: ESCROW_ABI,
+          functionName: "openEscrow",
+          args: [
+            BigInt(detail.chainProposalId),
+            toStableKey("group", String(detail.groupId)),
+            toStableKey("merchant", merchant.id),
+            menuSnapshotHash,
+            orderDetailHash,
+            merchant.payoutAddress as `0x${string}`,
+            [account],
+            BigInt(totalQuantity),
+            BigInt(result.quote.subtotalWei)
+          ],
+          account,
+          chain: walletClient.chain
+        });
+        escrowOrderId = await waitForEscrowOpened(openTxHash);
+        await registerPendingTransaction({
+          proposalId: detail.id,
+          action: "open_escrow",
+          txHash: openTxHash,
+          walletAddress: account,
+          relatedOrder: result.signature?.orderHash
+        }).catch(() => undefined);
+
+        const payTxHash = await walletClient.writeContract({
+          address: state.contractInfo!.orderEscrowContract as `0x${string}`,
+          abi: ESCROW_ABI,
+          functionName: "payForOrder",
+          args: [BigInt(escrowOrderId)],
+          account,
+          chain: walletClient.chain,
+          value: BigInt(result.quote.subtotalWei)
+        });
+        await registerPendingTransaction({
+          proposalId: detail.id,
+          action: "pay_order_escrow",
+          txHash: payTxHash,
+          walletAddress: account,
+          relatedOrder: result.signature?.orderHash
+        }).catch(() => undefined);
+      } else if (detail.chainProposalId && Boolean(result.signature?.signature) && isUsableContractAddress(state.contractInfo?.orderContract) && result.signature) {
         const walletClient = await ensureSepoliaWallet();
         const [account] = await walletClient.getAddresses();
         const valueWei = BigInt(result.quote.subtotalWei);
@@ -347,6 +530,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       await finalizeOrder({
         proposalId: detail.id,
         items: payload,
+        escrowOrderId: canUseEscrowOrder ? escrowOrderId : undefined,
         signature: result.signature
       });
       setOrderItems({});
@@ -364,6 +548,29 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     setActionPending(true);
     setMessage("");
     try {
+      const order = detail?.orders.find((item) => item.id === orderId);
+      if (
+        order?.escrowOrderId &&
+        isUsableContractAddress(state.contractInfo?.orderEscrowContract)
+      ) {
+        const { walletClient, publicClient, account } = await ensureSepoliaClients();
+        const txHash = await walletClient.writeContract({
+          address: state.contractInfo!.orderEscrowContract as `0x${string}`,
+          abi: ESCROW_ABI,
+          functionName: "memberConfirmReceived",
+          args: [BigInt(order.escrowOrderId)],
+          account,
+          chain: walletClient.chain
+        });
+        await publicClient.waitForTransactionReceipt({ hash: txHash });
+        await registerPendingTransaction({
+          proposalId: detail?.id || 0,
+          action: "confirm_order_received",
+          txHash,
+          walletAddress: account,
+          relatedOrder: order.orderHash
+        }).catch(() => undefined);
+      }
       await confirmMemberOrder(orderId);
       await refresh();
       setMessage("已確認接收訂單。");
@@ -399,7 +606,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
               <input className="meal-field" value={createDraft.title} onChange={(event) => setCreateDraft((current) => ({ ...current, title: event.target.value }))} />
             </Field>
             <Field label="候選店家上限 (必填)">
-              <input type="number" min={3} max={10} className="meal-field" value={createDraft.maxOptions} onChange={(event) => setCreateDraft((current) => ({ ...current, maxOptions: event.target.value }))} />
+              <input type="number" min={1} max={10} className="meal-field" value={createDraft.maxOptions} onChange={(event) => setCreateDraft((current) => ({ ...current, maxOptions: event.target.value }))} />
             </Field>
             <Field label="提案時間（分鐘） (必填)">
               <select className="meal-field" value={createDraft.proposalMinutes} onChange={(event) => setCreateDraft((current) => ({ ...current, proposalMinutes: event.target.value }))}>
@@ -416,22 +623,93 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
                 {stageDurationOptions.map((minutes) => <option key={`order-${minutes}`} value={String(minutes)}>{minutes} 分鐘</option>)}
               </select>
             </Field>
-            <MerchantPicker
-              label="首間候選店家（選填）"
-              merchants={state.merchants}
-              selectedMerchantId={createDraft.merchantId}
-              query={createMerchantQuery}
-              onQueryChange={setCreateMerchantQuery}
-              onSelect={(merchantId) => setCreateDraft((current) => ({ ...current, merchantId }))}
-            />
+            <div className="xl:col-span-3">
+              <Field label="搜尋店家（必填，請選 1 至 2 間）">
+                <input
+                  className="meal-field"
+                  value={createMerchantQuery}
+                  onChange={(event) => {
+                    setCreateMerchantQuery(event.target.value);
+                  }}
+                  placeholder="搜尋店名或 merchant id"
+                />
+              </Field>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {createDraft.merchantIds.map((merchantId) => {
+                  const merchant = state.merchants.find((item) => item.id === merchantId);
+                  return (
+                    <button
+                      key={merchantId}
+                      type="button"
+                      className="rounded-full border border-border bg-background px-3 py-1 text-sm"
+                      onClick={() => removeInitialMerchantSelection(merchantId)}
+                    >
+                      {merchant?.name || merchantId} ×
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-3 grid gap-2">
+                {state.merchants
+                  .filter((merchant) => {
+                    const keyword = createMerchantQuery.trim().toLowerCase();
+                    if (!keyword) return true;
+                    return merchant.id.toLowerCase().includes(keyword) || merchant.name.toLowerCase().includes(keyword);
+                  })
+                  .slice(0, 6)
+                  .map((merchant) => {
+                    const isSelected = createDraft.merchantIds.includes(merchant.id);
+                    return (
+                      <button
+                        key={merchant.id}
+                        type="button"
+                        onClick={() => {
+                          if (isSelected) {
+                            removeInitialMerchantSelection(merchant.id);
+                            return;
+                          }
+                          if (createDraft.merchantIds.length >= 2) {
+                            setMessage("建立訂單時最多只能選擇 2 間初始提案店家。");
+                            return;
+                          }
+                          setCreateDraft((current) => ({ ...current, merchantIds: [...current.merchantIds, merchant.id] }));
+                        }}
+                        className={`rounded-[1rem] border px-3 py-3 text-left transition ${
+                          isSelected
+                            ? "border-emerald-500 bg-emerald-50 text-emerald-900 shadow-[0_8px_24px_rgba(16,185,129,0.12)]"
+                            : "border-border bg-background hover:bg-secondary"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-semibold">{merchant.name}</p>
+                            <p className="text-xs opacity-80">{merchant.id}</p>
+                          </div>
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-bold ${
+                              isSelected ? "bg-emerald-500 text-white" : "bg-[rgba(148,74,0,0.08)] text-muted-foreground"
+                            }`}
+                          >
+                            {isSelected ? "已選擇" : "可選擇"}
+                          </span>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
           </div>
           <div className="mt-5 flex items-center gap-3">
-            <Button onClick={handleCreateOrder} disabled={actionPending || !createDraft.groupId || !createDraft.title.trim()}>{actionPending ? "處理中..." : "建立本輪訂單"}</Button>
-            <p className="text-sm text-muted-foreground">建立後可到下一個階段繼續提名店家。</p>
+            <Button onClick={handleCreateOrder} disabled={actionPending || !createDraft.groupId || !createDraft.title.trim() || createDraft.merchantIds.length === 0}>{actionPending ? "處理中..." : "建立本輪訂單"}</Button>
+            <p className="text-sm text-muted-foreground">建立費加上初始提案費會在建立時一起記錄；投票結束成功選出店家後，才會退回建立費。</p>
           </div>
           <label className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
             <input type="checkbox" checked={useCreateOrderTicket} onChange={(event) => setUseCreateOrderTicket(event.target.checked)} />
-            使用建立訂單券。建立成功後才會扣除 1 張建立訂單券。
+            使用建立訂單優惠券。僅抵用建立訂單費，初始提案費仍依提案店家數計算。
+          </label>
+          <label className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
+            <input type="checkbox" checked={useInitialProposalTickets} onChange={(event) => setUseInitialProposalTickets(event.target.checked)} />
+            初始提案優先使用提案優惠券。若你有多張提案優惠券，會依序套用到最多 2 間初始提案店家。
           </label>
         </section>
       ) : null}
@@ -562,8 +840,20 @@ function StageList({
               <p className="text-sm text-muted-foreground">
                 已提店家數：{proposal.options.length}
               </p>
+              <div className="flex flex-wrap gap-2">
+                {proposal.options.slice(0, 4).map((option) => (
+                  <span key={option.id} className="rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground">
+                    {option.merchantName}
+                  </span>
+                ))}
+                {proposal.options.length > 4 ? (
+                  <span className="rounded-full border border-border bg-background px-3 py-1 text-xs text-muted-foreground">
+                    +{proposal.options.length - 4} 間
+                  </span>
+                ) : null}
+              </div>
               <p className="text-sm text-muted-foreground">
-                {stage === "voting" ? `目前已參與投票數：${safeArray(proposal.votes).length}` : stage === "ordering" ? `已點餐人數：${proposal.orderMemberCount}` : `群組編號：${proposal.groupId}`}
+                {stage === "voting" ? `目前已參與投票人數：${safeArray(proposal.votes).length} / 總票數：${proposal.totalVoteCount || 0}` : stage === "ordering" ? `已點餐人數：${proposal.orderMemberCount}` : `群組編號：${proposal.groupId}`}
               </p>
               <p className="text-sm text-muted-foreground">
                 {stage === "proposal" || stage === "create"
@@ -633,14 +923,16 @@ function StageDetail(props: {
   const selectedItems = merchantMenu?.menu.filter((item) => (props.orderItems[item.id] || 0) > 0) || [];
   const selectedPortions = selectedItems.reduce((sum, item) => sum + (props.orderItems[item.id] || 0), 0);
   const selectedSubtotalWei = selectedItems.reduce((total, item) => total + BigInt(item.priceWei) * BigInt(props.orderItems[item.id] || 0), 0n);
+  const detailHeading = stageDetailHeading(stage);
 
   return (
     <div className="space-y-6">
       <section className="meal-panel p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <p className="meal-kicker">Detail</p>
-            <h2 className="text-3xl font-extrabold">{proposal.title}</h2>
+            <p className="meal-kicker">{detailHeading.kicker}</p>
+            <h2 className="text-3xl font-extrabold">{detailHeading.title}</h2>
+            <p className="mt-2 text-base font-semibold text-foreground">{proposal.title}</p>
             <p className="mt-3 text-sm text-muted-foreground">
               {stage === "proposal" ? `提案截止：${formatDateTime(proposal.proposalDeadline)}（設定 ${getProposalStageMinutes(proposal, "proposal")} 分鐘） / 剩餘 ${formatCountdown(proposal.proposalDeadline, now)}` : null}
               {stage === "voting" ? `投票截止：${formatDateTime(proposal.voteDeadline)}（設定 ${getProposalStageMinutes(proposal, "vote")} 分鐘） / 剩餘 ${formatCountdown(proposal.voteDeadline, now)}` : null}
@@ -679,7 +971,7 @@ function StageDetail(props: {
           <section className="meal-panel p-8">
             <p className="meal-kicker">Add merchant</p>
             <h3 className="text-2xl font-extrabold">新增提案店家</h3>
-            <p className="mt-3 text-sm text-muted-foreground">每位成員最多只能提案兩間店家。你可以選擇用提案券抵用這次提案。</p>
+            <p className="mt-3 text-sm text-muted-foreground">每位成員最多只能提案兩間店家；同一間店不可重複提案。確認提案後即鎖定，並記錄提案費或提案優惠券使用。</p>
             <div className="mt-6">
               <MerchantPicker
                 label="提名店家 (必填)"
@@ -692,7 +984,7 @@ function StageDetail(props: {
             </div>
             <label className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
               <input type="checkbox" checked={props.useProposalTicket} onChange={(event) => props.setUseProposalTicket(event.target.checked)} />
-              使用提案券送出這次店家提案
+              使用提案優惠券送出這次店家提案
             </label>
             <Button className="mt-4" onClick={props.onAddOption} disabled={actionPending || !resolveMerchantId(props.optionMerchantId, props.optionMerchantQuery, merchants)}>
               新增提案店家
@@ -716,7 +1008,7 @@ function StageDetail(props: {
             <p className="meal-kicker">Vote</p>
             <h3 className="text-2xl font-extrabold">投票給店家</h3>
             <div className="mt-6 space-y-4">
-              <Field label="這輪投票的 token 權重 (必填)">
+              <Field label="這輪要投幾票 (必填)">
                 <div className="flex gap-3">
                   <input type="number" min={1} className="meal-field" value={props.voteTokens} onChange={(event) => props.setVoteTokens(event.target.value)} disabled={props.useVoteTicket} />
                   <Button variant="secondary" onClick={props.onVoteQuote}>試算</Button>
@@ -725,16 +1017,16 @@ function StageDetail(props: {
               </Field>
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
                 <input type="checkbox" checked={props.useVoteTicket} onChange={(event) => props.setUseVoteTicket(event.target.checked)} />
-                使用投票券。截止前都可抽回更換，最後一次投票為準。
+                使用投票優惠券。投票優惠券固定換 1 票，確認投票後不可更改。
               </label>
               {proposal.options.map((option) => (
                 <div key={option.id} className="rounded-[1.2rem] border border-border bg-background/70 p-4">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="font-semibold">{option.merchantName}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">目前 {option.weightedVotes} 票重</p>
+                      <p className="mt-1 text-sm text-muted-foreground">目前 {option.weightedVotes} 票</p>
                     </div>
-                    <Button onClick={() => props.onVote(option.id)} disabled={actionPending || (!props.useVoteTicket && !props.voteTokens.trim())}>投給這家</Button>
+                    <Button onClick={() => props.onVote(option.id)} disabled={actionPending || (!props.useVoteTicket && !props.voteTokens.trim())}>確認投票這家</Button>
                   </div>
                 </div>
               ))}
@@ -789,7 +1081,7 @@ function StageDetail(props: {
               <p className="mt-2 text-lg font-semibold">{formatWeiFriendly(selectedSubtotalWei)}</p>
               <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                 <Wallet className="h-4 w-4" />
-                {isUsableContractAddress(props.contractInfo?.orderContract) ? "本輪會喚起 MetaMask 進行 Sepolia 合約支付。" : "本輪會先付款到平台中心錢包。"}
+                {isUsableContractAddress(props.contractInfo?.orderEscrowContract) ? "本輪會喚起 MetaMask 進行 Sepolia escrow 合約支付。" : "本輪會先付款到平台中心錢包。"}
               </p>
               <Button className="mt-4" onClick={props.onOrder} disabled={actionPending || !selectedItems.length}>送出點餐並前往錢包支付</Button>
             </div>
@@ -933,12 +1225,51 @@ function safeArray<T>(value: T[] | null | undefined) {
 }
 
 function normalizeProposal(proposal: Proposal): Proposal {
+  const votes = safeArray(proposal.votes);
+  const createdAt = new Date(proposal.createdAt).getTime();
+  let proposalDeadline = new Date(proposal.proposalDeadline).getTime();
+  let voteDeadline = new Date(proposal.voteDeadline).getTime();
+  let orderDeadline = new Date(proposal.orderDeadline).getTime();
+  const proposalMinutes = Math.round((proposalDeadline - createdAt) / 60000);
+  if (Number.isFinite(createdAt) && Number.isFinite(proposalDeadline) && proposalMinutes > 90 && proposalMinutes <= 1530) {
+    proposalDeadline -= 1440 * 60000;
+    voteDeadline -= 1440 * 60000;
+    orderDeadline -= 1440 * 60000;
+  }
   return {
     ...proposal,
+    proposalDeadline: new Date(proposalDeadline).toISOString(),
+    voteDeadline: new Date(voteDeadline).toISOString(),
+    orderDeadline: new Date(orderDeadline).toISOString(),
     options: safeArray(proposal.options),
     orders: safeArray(proposal.orders),
-    votes: safeArray(proposal.votes)
+    votes,
+    totalVoteCount: proposal.totalVoteCount ?? votes.reduce((sum, vote) => sum + (vote.voteCount ?? vote.voteWeight ?? 0), 0)
   };
+}
+
+function dedupeProposals(proposals: Proposal[]) {
+  const byKey = new Map<string, Proposal>();
+  for (const proposal of proposals) {
+    const key = proposal.chainProposalId ? `chain:${proposal.chainProposalId}` : `local:${proposal.id}`;
+    const existing = byKey.get(key);
+    if (!existing) {
+      byKey.set(key, proposal);
+      continue;
+    }
+    byKey.set(key, scoreProposal(existing) >= scoreProposal(proposal) ? existing : proposal);
+  }
+  return Array.from(byKey.values());
+}
+
+function scoreProposal(proposal: Proposal) {
+  let score = 0;
+  score += proposal.groupId > 0 ? 1000 : 0;
+  score += proposal.options.length * 100;
+  score += safeArray(proposal.orders).length * 20;
+  score += safeArray(proposal.votes).length * 10;
+  score += proposal.title.startsWith("Chain Proposal #") ? 0 : 50;
+  return score;
 }
 
 function resolveMerchantId(selectedMerchantId: string, query: string, merchants: Merchant[]) {
@@ -978,9 +1309,24 @@ function getProposalStageMinutes(proposal: Proposal, stage: "proposal" | "vote" 
   const voteAt = new Date(proposal.voteDeadline).getTime();
   const orderAt = new Date(proposal.orderDeadline).getTime();
   if (!Number.isFinite(createdAt) || !Number.isFinite(proposalAt) || !Number.isFinite(voteAt) || !Number.isFinite(orderAt)) return 0;
-  if (stage === "proposal") return Math.max(0, Math.round((proposalAt - createdAt) / 60000));
-  if (stage === "vote") return Math.max(0, Math.round((voteAt - proposalAt) / 60000));
-  return Math.max(0, Math.round((orderAt - voteAt) / 60000));
+  if (stage === "proposal") return normalizeStageMinutes(Math.round((proposalAt - createdAt) / 60000));
+  if (stage === "vote") return normalizeStageMinutes(Math.round((voteAt - proposalAt) / 60000));
+  return normalizeStageMinutes(Math.round((orderAt - voteAt) / 60000));
+}
+
+function normalizeStageMinutes(minutes: number) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return 0;
+  let normalized = minutes;
+  while (normalized > 1440) {
+    normalized -= 1440;
+  }
+  if (normalized > 90 && normalized-1440 <= 90) {
+    normalized -= 1440;
+  }
+  if (normalized > 90 && normalized >= 1440) {
+    normalized = normalized % 1440;
+  }
+  return Math.max(0, normalized);
 }
 
 function formatProposalStatus(status: string) {
@@ -995,8 +1341,28 @@ function formatProposalStatus(status: string) {
       return "待結算";
     case "settled":
       return "已完成";
+    case "failed":
+      return "成立失敗";
+    case "cancelled":
+      return "已撤回";
     default:
       return status;
+  }
+}
+
+function stageDetailHeading(stage: Stage) {
+  switch (stage) {
+    case "proposal":
+      return { kicker: "Proposal stage", title: "店家提案階段" };
+    case "voting":
+      return { kicker: "Voting stage", title: "投票階段" };
+    case "ordering":
+      return { kicker: "Ordering stage", title: "點餐階段" };
+    case "submitted":
+      return { kicker: "Submitted stage", title: "完成送出訂單階段" };
+    case "create":
+    default:
+      return { kicker: "Create stage", title: "建立訂單" };
   }
 }
 

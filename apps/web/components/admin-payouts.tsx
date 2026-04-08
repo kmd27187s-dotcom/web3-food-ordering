@@ -3,19 +3,21 @@
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { fetchAdminDashboard, markAdminOrderPaid, updatePlatformTreasury, type AdminDashboard } from "@/lib/api";
-import { ensureSepoliaWallet, isUsableContractAddress } from "@/lib/chain";
+import { fetchAdminDashboard, fetchContractInfo, markAdminOrderPaid, updatePlatformTreasury, type AdminDashboard, type ContractInfo } from "@/lib/api";
+import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress } from "@/lib/chain";
 import { connectWallet } from "@/lib/wallet-auth";
 
 export function AdminPayouts() {
   const [data, setData] = useState<AdminDashboard | null>(null);
+  const [contractInfo, setContractInfo] = useState<ContractInfo | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
 
   async function refresh() {
-    const dashboard = await fetchAdminDashboard();
+    const [dashboard, contract] = await Promise.all([fetchAdminDashboard(), fetchContractInfo().catch(() => null)]);
     setData(dashboard);
+    setContractInfo(contract);
   }
 
   useEffect(() => {
@@ -39,27 +41,34 @@ export function AdminPayouts() {
     }
   }
 
-  async function handleReleasePayout(orderId: number, payoutAddress: string, amountWei: string) {
+  async function handleReleasePayout(orderId: number, escrowOrderId?: number) {
     if (!data?.platformTreasury || !isUsableContractAddress(data.platformTreasury)) {
       setMessage("請先設定可用的平台中心錢包。");
+      return;
+    }
+    if (!escrowOrderId || !isUsableContractAddress(contractInfo?.orderEscrowContract)) {
+      setMessage("找不到可用的 escrow 訂單或合約地址。");
       return;
     }
     setPending(true);
     setMessage("");
     try {
-      const walletClient = await ensureSepoliaWallet();
-      const [walletAddress] = await walletClient.getAddresses();
+      const { walletClient, publicClient, account: walletAddress } = await ensureSepoliaClients();
       if (walletAddress.toLowerCase() !== data.platformTreasury.toLowerCase()) {
         throw new Error("目前連結的 MetaMask 不是已綁定的平台中心錢包。");
       }
-      await walletClient.sendTransaction({
-        to: payoutAddress as `0x${string}`,
-        value: BigInt(amountWei),
-        account: walletAddress
+      const txHash = await walletClient.writeContract({
+        address: contractInfo!.orderEscrowContract as `0x${string}`,
+        abi: ESCROW_ABI,
+        functionName: "releasePayout",
+        args: [BigInt(escrowOrderId)],
+        account: walletAddress,
+        chain: walletClient.chain
       });
+      await publicClient.waitForTransactionReceipt({ hash: txHash });
       await markAdminOrderPaid(orderId);
       await refresh();
-      setMessage("已從平台中心錢包撥款給店家。");
+      setMessage("已從 escrow 合約完成正式撥款。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "平台撥款失敗");
     } finally {
@@ -104,7 +113,7 @@ export function AdminPayouts() {
             <div key={order.orderId} className="rounded-[1.4rem] border border-border bg-background/70 p-5">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <p className="font-bold">訂單 #{order.orderId} / {order.merchantName}</p>
+                  <p className="font-bold">{order.title || `訂單 #${order.orderId}`} / {order.merchantName}</p>
                   <p className="mt-2 text-sm text-muted-foreground">{order.memberName} • {new Date(order.createdAt).toLocaleString("zh-TW")}</p>
                   <p className="mt-2 break-all text-sm text-muted-foreground">店家收款錢包：{order.merchantPayoutAddress}</p>
                 </div>
@@ -113,8 +122,8 @@ export function AdminPayouts() {
                   <p className="mt-1 text-sm text-muted-foreground">{order.status}</p>
                 </div>
               </div>
-              <Button className="mt-4" disabled={pending} onClick={() => handleReleasePayout(order.orderId, order.merchantPayoutAddress, order.amountWei)}>
-                從平台錢包撥款
+              <Button className="mt-4" disabled={pending} onClick={() => handleReleasePayout(order.orderId, order.escrowOrderId)}>
+                從 escrow 合約撥款
               </Button>
             </div>
           ))}

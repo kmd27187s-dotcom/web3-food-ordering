@@ -21,6 +21,7 @@ import (
 type Client struct {
 	privateKey *ecdsa.PrivateKey
 	chainID    int64
+	governance common.Address
 	contract   common.Address
 	token      common.Address
 	treasury   common.Address
@@ -52,6 +53,7 @@ func NewClient(cfg config.ChainConfig) (*Client, error) {
 	return &Client{
 		privateKey: privateKey,
 		chainID:    cfg.ChainID,
+		governance: common.HexToAddress(cfg.GovernanceContract),
 		contract:   common.HexToAddress(cfg.OrderContract),
 		token:      common.HexToAddress(cfg.MembershipToken),
 		treasury:   common.HexToAddress(cfg.PlatformTreasury),
@@ -64,11 +66,13 @@ func NewClient(cfg config.ChainConfig) (*Client, error) {
 
 func (c *Client) ContractInfo() models.ContractInfo {
 	return models.ContractInfo{
-		ChainID:          c.chainID,
-		OrderContract:    c.contract.Hex(),
-		TokenContract:    c.token.Hex(),
-		PlatformTreasury: c.treasury.Hex(),
-		SignerAddress:    c.signer.Hex(),
+		ChainID:            c.chainID,
+		GovernanceContract: c.governance.Hex(),
+		OrderEscrowContract: c.contract.Hex(),
+		OrderContract:      c.contract.Hex(),
+		TokenContract:      c.token.Hex(),
+		PlatformTreasury:   c.treasury.Hex(),
+		SignerAddress:      c.signer.Hex(),
 	}
 }
 

@@ -57,7 +57,7 @@ export function MemberAccount() {
       <div className="mt-6 grid gap-4 md:grid-cols-2">
         <Stat label="名稱" value={member.displayName} />
         <Stat label="會員錢包" value={member.walletAddress || "尚未綁定"} breakAll />
-        <Stat label="Token" value={`${member.tokenBalance}`} />
+        <Stat label="平台 Token" value={`${member.tokenBalance}`} />
         <Stat label="積分" value={`${member.points} pts`} />
       </div>
       <div className="mt-6 flex flex-wrap gap-3">

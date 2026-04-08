@@ -11,26 +11,31 @@ import (
 )
 
 const (
-	optionTokenCost      = int64(1)
-	winnerTokenReward    = int64(6)
-	loserPartialRefund   = int64(4)
-	voterPoints          = int64(25)
-	winnerProposerPoints = int64(120)
+	defaultMaxProposalOptions = int64(10)
 )
+
+type governanceParamsReader interface {
+	GovernanceParams() (*models.GovernanceParams, error)
+}
 
 // ProposalService owns all business rules for proposals, options, votes, and settlement.
 type ProposalService struct {
 	proposals repository.ProposalRepo
 	members   repository.MemberRepo
 	merchants repository.MerchantRepo
+	settings  governanceParamsReader
 }
 
-func NewProposalService(proposals repository.ProposalRepo, members repository.MemberRepo, merchants repository.MerchantRepo) *ProposalService {
-	return &ProposalService{proposals: proposals, members: members, merchants: merchants}
+func NewProposalService(proposals repository.ProposalRepo, members repository.MemberRepo, merchants repository.MerchantRepo, settings governanceParamsReader) *ProposalService {
+	return &ProposalService{proposals: proposals, members: members, merchants: merchants, settings: settings}
 }
 
 func (s *ProposalService) Create(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions, proposalMinutes, voteMinutes, orderMinutes int64, consumeProposalToken bool, useCreateOrderTicket bool) (*models.Proposal, error) {
 	member, err := s.members.MemberByID(memberID)
+	if err != nil {
+		return nil, err
+	}
+	params, err := s.settings.GovernanceParams()
 	if err != nil {
 		return nil, err
 	}
@@ -49,14 +54,11 @@ func (s *ProposalService) Create(memberID int64, title, description, merchantGro
 	if err != nil {
 		return nil, err
 	}
-	if maxOptions < 3 || maxOptions > 10 {
-		return nil, errors.New("maxOptions must be between 3 and 10")
+	if maxOptions < 1 || maxOptions > defaultMaxProposalOptions {
+		return nil, errors.New("maxOptions must be between 1 and 10")
 	}
 	if !isAllowedStageDuration(proposalMinutes) || !isAllowedStageDuration(voteMinutes) || !isAllowedStageDuration(orderMinutes) {
 		return nil, errors.New("all stage durations must be 10 to 90 minutes in 10-minute steps")
-	}
-	if consumeProposalToken && member.TokenBalance < optionTokenCost {
-		return nil, errors.New("insufficient token balance")
 	}
 	proposalDeadline := baseStart.Add(time.Duration(proposalMinutes) * time.Minute)
 	voteDeadline := baseStart.Add(time.Duration(proposalMinutes+voteMinutes) * time.Minute)
@@ -65,9 +67,9 @@ func (s *ProposalService) Create(memberID int64, title, description, merchantGro
 		return nil, err
 	}
 	if consumeProposalToken {
-		return s.proposals.CreateProposalWithCredit(memberID, title, description, merchantGroup, mealPeriod, scheduledDate, maxOptions, member.DisplayName, proposalDeadline, voteDeadline, orderDeadline, useCreateOrderTicket)
+		return s.proposals.CreateProposalWithCredit(memberID, title, description, merchantGroup, mealPeriod, scheduledDate, maxOptions, member.DisplayName, proposalDeadline, voteDeadline, orderDeadline, params, useCreateOrderTicket)
 	}
-	return s.proposals.CreateProposal(memberID, title, description, merchantGroup, mealPeriod, scheduledDate, maxOptions, member.DisplayName, proposalDeadline, voteDeadline, orderDeadline)
+	return s.proposals.CreateProposal(memberID, title, description, merchantGroup, mealPeriod, scheduledDate, maxOptions, member.DisplayName, proposalDeadline, voteDeadline, orderDeadline, params)
 }
 
 // CreateWithDeadlines creates a proposal with explicit deadlines (for demo/admin use).
@@ -92,7 +94,11 @@ func (s *ProposalService) CreateWithDeadlines(memberID int64, title, description
 	if err := validateProposalDeadlines(proposalDeadline, voteDeadline, orderDeadline); err != nil {
 		return nil, err
 	}
-	return s.proposals.CreateProposal(memberID, title, description, merchantGroup, mealPeriod, proposalDate, maxOptions, createdByName, proposalDeadline, voteDeadline, orderDeadline)
+	params, err := s.settings.GovernanceParams()
+	if err != nil {
+		return nil, err
+	}
+	return s.proposals.CreateProposal(memberID, title, description, merchantGroup, mealPeriod, proposalDate, maxOptions, createdByName, proposalDeadline, voteDeadline, orderDeadline, params)
 }
 
 func (s *ProposalService) Get(id int64) (*models.Proposal, error) {
@@ -146,8 +152,9 @@ func (s *ProposalService) AddOption(proposalID, memberID int64, merchantID strin
 	if err != nil {
 		return nil, err
 	}
-	if member.TokenBalance < optionTokenCost && member.ProposalTicketCount <= 0 {
-		return nil, errors.New("insufficient token balance")
+	params, err := s.settings.GovernanceParams()
+	if err != nil {
+		return nil, err
 	}
 	merchant, err := s.merchants.GetMerchant(merchantID)
 	if err != nil {
@@ -167,7 +174,10 @@ func (s *ProposalService) AddOption(proposalID, memberID int64, merchantID strin
 	if memberProposalCount >= 2 {
 		return nil, errors.New("每位成員最多只能提案兩間店家")
 	}
-	opt, err := s.proposals.InsertProposalOption(proposalID, memberID, merchant.ID, merchant.Name, member.DisplayName, optionTokenCost, useProposalTicket)
+	if !useProposalTicket && member.ProposalCouponCount <= 0 {
+		// no-op: governance fee will be handled by backend ledger for now
+	}
+	opt, err := s.proposals.InsertProposalOption(proposalID, memberID, merchant.ID, merchant.Name, member.DisplayName, params.ProposalFeeWei, useProposalTicket)
 	if err != nil {
 		if errors.Is(err, repository.ErrDuplicateOption) {
 			return nil, errors.New("you already proposed an option for this proposal")
@@ -177,7 +187,7 @@ func (s *ProposalService) AddOption(proposalID, memberID int64, merchantID strin
 	return opt, nil
 }
 
-func (s *ProposalService) Vote(proposalID, memberID, optionID, tokenAmount int64, useVoteTicket bool) (*models.Proposal, error) {
+func (s *ProposalService) Vote(proposalID, memberID, optionID, voteCount int64, useVoteTicket bool) (*models.Proposal, error) {
 	proposal, err := s.proposals.GetProposal(proposalID)
 	if err != nil {
 		return nil, err
@@ -192,14 +202,15 @@ func (s *ProposalService) Vote(proposalID, memberID, optionID, tokenAmount int64
 	if err != nil {
 		return nil, err
 	}
-	if !useVoteTicket && tokenAmount <= 0 {
-		return nil, errors.New("tokenAmount must be greater than zero")
+	if voteCount <= 0 {
+		return nil, errors.New("voteCount must be greater than zero")
 	}
 	if useVoteTicket && member.VoteTicketCount <= 0 {
 		return nil, errors.New("目前沒有可用的投票券")
 	}
-	if !useVoteTicket && member.TokenBalance < tokenAmount {
-		return nil, errors.New("insufficient token balance")
+	params, err := s.settings.GovernanceParams()
+	if err != nil {
+		return nil, err
 	}
 	found := false
 	for _, opt := range proposal.Options {
@@ -211,27 +222,54 @@ func (s *ProposalService) Vote(proposalID, memberID, optionID, tokenAmount int64
 	if !found {
 		return nil, errors.New("option not found")
 	}
+	feeAmountWei := params.VoteFeeWei * voteCount
 	if useVoteTicket {
-		tokenAmount = 1
+		feeAmountWei -= params.VoteFeeWei
+		if feeAmountWei < 0 {
+			feeAmountWei = 0
+		}
 	}
-	if err := s.proposals.RecordVote(proposalID, memberID, optionID, tokenAmount, member.DisplayName, useVoteTicket); err != nil {
+	if err := s.proposals.RecordVote(proposalID, memberID, optionID, voteCount, feeAmountWei, member.DisplayName, useVoteTicket); err != nil {
 		if errors.Is(err, repository.ErrDuplicateVote) {
-			return nil, errors.New("投票更新失敗")
+			return nil, errors.New("你已經完成投票，付款確認後不可再次修改")
 		}
 		return nil, err
 	}
 	return s.proposals.GetProposal(proposalID)
 }
 
-func (s *ProposalService) QuoteOption() map[string]int64 {
-	return map[string]int64{"tokenCost": optionTokenCost}
+func (s *ProposalService) QuoteOption() (map[string]int64, error) {
+	params, err := s.settings.GovernanceParams()
+	if err != nil {
+		return nil, err
+	}
+	return map[string]int64{"proposalFeeWei": params.ProposalFeeWei}, nil
 }
 
-func (s *ProposalService) QuoteVote(tokenAmount int64) (map[string]int64, error) {
-	if tokenAmount <= 0 {
-		return nil, errors.New("tokenAmount must be greater than zero")
+func (s *ProposalService) QuoteVote(voteCount int64, useVoteTicket bool) (map[string]int64, error) {
+	if voteCount <= 0 {
+		return nil, errors.New("voteCount must be greater than zero")
 	}
-	return map[string]int64{"tokenAmount": tokenAmount, "voteWeight": tokenAmount}, nil
+	params, err := s.settings.GovernanceParams()
+	if err != nil {
+		return nil, err
+	}
+	discountedVotes := int64(0)
+	feeAmountWei := params.VoteFeeWei * voteCount
+	if useVoteTicket {
+		discountedVotes = 1
+		feeAmountWei -= params.VoteFeeWei
+		if feeAmountWei < 0 {
+			feeAmountWei = 0
+		}
+	}
+	return map[string]int64{
+		"voteCount":       voteCount,
+		"voteWeight":      voteCount,
+		"feeAmountWei":    feeAmountWei,
+		"voteFeeWei":      params.VoteFeeWei,
+		"discountedVotes": discountedVotes,
+	}, nil
 }
 
 func (s *ProposalService) FinalizeSettlement(proposalID int64) (*models.Proposal, error) {
@@ -239,59 +277,10 @@ func (s *ProposalService) FinalizeSettlement(proposalID int64) (*models.Proposal
 	if err != nil {
 		return nil, err
 	}
-	if !isCurrentProposalDay(proposal.ProposalDate) {
-		return nil, errors.New("proposal expired for today")
-	}
-	if proposal.Status != "awaiting_settlement" && proposal.Status != "settled" {
-		return nil, errors.New("proposal has not reached settlement stage")
-	}
 	if proposal.RewardsApplied {
-		return nil, errors.New("proposal rewards already settled")
+		return proposal, nil
 	}
-	if proposal.WinnerOptionID == 0 {
-		return nil, errors.New("winner not finalized")
-	}
-
-	var rewards []repository.MemberReward
-	var optionRefunds []repository.OptionRefund
-
-	for _, opt := range proposal.Options {
-		if opt.ID == proposal.WinnerOptionID {
-			rewards = append(rewards, repository.MemberReward{
-				MemberID: opt.ProposerMember,
-				Points:   winnerProposerPoints,
-				Tokens:   winnerTokenReward,
-			})
-			optionRefunds = append(optionRefunds, repository.OptionRefund{
-				OptionID:        opt.ID,
-				WinnerTokenBack: winnerTokenReward,
-			})
-		} else {
-			rewards = append(rewards, repository.MemberReward{
-				MemberID: opt.ProposerMember,
-				Tokens:   loserPartialRefund,
-			})
-			optionRefunds = append(optionRefunds, repository.OptionRefund{
-				OptionID:      opt.ID,
-				PartialRefund: loserPartialRefund,
-			})
-		}
-	}
-	voterIDs := make(map[int64]bool)
-	for _, vote := range proposal.Votes {
-		if !voterIDs[vote.MemberID] {
-			voterIDs[vote.MemberID] = true
-			rewards = append(rewards, repository.MemberReward{
-				MemberID: vote.MemberID,
-				Points:   voterPoints,
-			})
-		}
-	}
-
-	if err := s.proposals.ApplySettlementRewards(proposalID, rewards, optionRefunds); err != nil {
-		return nil, err
-	}
-	return s.proposals.GetProposal(proposalID)
+	return nil, errors.New("proposal settlement is handled automatically when the voting deadline is reached")
 }
 
 func (s *ProposalService) GetMerchant(id string) (*models.Merchant, error) {
@@ -303,10 +292,7 @@ func (s *ProposalService) ListMerchants() ([]*models.Merchant, error) {
 }
 
 func resolveProposalSchedule(proposalDate string, now time.Time) (string, time.Time, error) {
-	location := now.Location()
-	if location == nil {
-		location = proposalBusinessLocation()
-	}
+	location := proposalBusinessLocation()
 	if proposalDate == "" {
 		proposalDate = now.In(location).Format("2006-01-02")
 	}

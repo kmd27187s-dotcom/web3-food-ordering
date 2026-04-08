@@ -27,15 +27,18 @@ function main() {
   const frontendConfig = {
     network: deployment.network,
     chainId: deployment.chainId,
-    orderContract: deployment.contracts.votingSystem,
-    tokenContract: deployment.contracts.membershipToken
+    governanceContract: deployment.contracts.governance,
+    orderEscrowContract: deployment.contracts.orderEscrow,
+    orderContract: deployment.contracts.orderEscrow,
+    platformTreasury: deployment.platformWallet
   };
 
   const backendEnv = [
     `CHAIN_ID=${deployment.chainId}`,
-    `ORDER_CONTRACT_ADDRESS=${deployment.contracts.votingSystem}`,
-    `MEMBERSHIP_TOKEN_ADDRESS=${deployment.contracts.membershipToken}`,
-    `PLATFORM_TREASURY_ADDRESS=${deployment.config.platformMainWallet}`,
+    `GOVERNANCE_CONTRACT_ADDRESS=${deployment.contracts.governance}`,
+    `ORDER_ESCROW_CONTRACT_ADDRESS=${deployment.contracts.orderEscrow}`,
+    `ORDER_CONTRACT_ADDRESS=${deployment.contracts.orderEscrow}`,
+    `PLATFORM_TREASURY_ADDRESS=${deployment.platformWallet}`,
     `SIGNER_PRIVATE_KEY=`,
     `RPC_URL=`
   ].join("\n");
@@ -44,8 +47,10 @@ function main() {
     `NEXT_PUBLIC_API_BASE=http://localhost:8080`,
     `NEXT_PUBLIC_SEPOLIA_RPC_URL=`,
     `NEXT_PUBLIC_CHAIN_ID=${deployment.chainId}`,
-    `NEXT_PUBLIC_ORDER_CONTRACT_ADDRESS=${deployment.contracts.votingSystem}`,
-    `NEXT_PUBLIC_TOKEN_CONTRACT_ADDRESS=${deployment.contracts.membershipToken}`
+    `NEXT_PUBLIC_GOVERNANCE_CONTRACT_ADDRESS=${deployment.contracts.governance}`,
+    `NEXT_PUBLIC_ORDER_ESCROW_CONTRACT_ADDRESS=${deployment.contracts.orderEscrow}`,
+    `NEXT_PUBLIC_ORDER_CONTRACT_ADDRESS=${deployment.contracts.orderEscrow}`,
+    `NEXT_PUBLIC_PLATFORM_TREASURY_ADDRESS=${deployment.platformWallet}`
   ].join("\n");
 
   writeJSON(path.resolve("frontend/src/generated/contracts.json"), frontendConfig);

@@ -38,6 +38,11 @@ const adminActions = [
     href: "/admin/merchant-delists",
     title: "下架審核",
     body: "處理店家送出的下架申請。"
+  },
+  {
+    href: "/admin/settings",
+    title: "治理參數設定",
+    body: "設定建立訂單費、提案費、投票費、退款比例、積分與逾期時間。"
   }
 ] as const;
 
@@ -110,13 +115,25 @@ export function AdminDashboard() {
 
   return (
     <div className="space-y-6">
+      {(() => {
+        const governanceParams = data.governanceParams;
+        return (
       <section className="meal-panel p-8">
         <p className="meal-kicker">Admin home</p>
         <h1 className="text-3xl font-extrabold">平台管理首頁</h1>
         <p className="mt-3 max-w-3xl text-sm leading-7 text-muted-foreground">
           上方數據卡可直接點進詳細資料；平台錢包、撥款、菜單審核與下架審核都已拆到獨立頁面處理。
         </p>
+        {governanceParams ? (
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            <SummaryStat label="建立訂單費" value={`${governanceParams.createFeeWei} Wei`} />
+            <SummaryStat label="提案費" value={`${governanceParams.proposalFeeWei} Wei`} />
+            <SummaryStat label="投票費" value={`${governanceParams.voteFeeWei} Wei / 票`} />
+          </div>
+        ) : null}
       </section>
+        );
+      })()}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {statCards.map((card) => {
@@ -146,6 +163,15 @@ export function AdminDashboard() {
       </section>
 
       {message ? <p className="text-sm text-[hsl(7_65%_42%)]">{message}</p> : null}
+    </div>
+  );
+}
+
+function SummaryStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-border bg-background/70 p-4">
+      <p className="text-xs font-black uppercase tracking-[0.22em] text-muted-foreground">{label}</p>
+      <p className="mt-2 text-base font-semibold text-foreground">{value}</p>
     </div>
   );
 }

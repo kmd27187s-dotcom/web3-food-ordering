@@ -67,7 +67,7 @@ type Server struct {
 
 func NewServer(cfg config.Config, store repository.Store, chain *blockchain.Client) *Server {
 	members := service.NewMemberService(store)
-	proposals := service.NewProposalService(store, store, store)
+	proposals := service.NewProposalService(store, store, store, store)
 	orders := service.NewOrderService(store, store, store, store, chain)
 	leaderboard := service.NewLeaderboardService(store)
 	return &Server{
@@ -93,11 +93,12 @@ func (s *Server) Routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.handleHealth)
 	mux.HandleFunc("GET /contract", s.handleContractInfo)
+	mux.HandleFunc("GET /governance/params", s.handlePublicGovernanceParams)
 	mux.HandleFunc("POST /auth/login", s.withConfiguredRateLimit(loginRateLimitKey, s.cfg.RateLimit.Login, loginRateLimitMax, loginRateLimitWindow, s.handlePasswordLogin))
-	mux.HandleFunc("POST /auth/wallet/challenge", s.withConfiguredRateLimit(registerRateLimitKey, s.cfg.RateLimit.Register, registerRateLimitMax, registerRateLimitWindow, s.handleWalletChallenge))
-	mux.HandleFunc("POST /auth/wallet/verify", s.withConfiguredRateLimit(loginRateLimitKey, s.cfg.RateLimit.Login, loginRateLimitMax, loginRateLimitWindow, s.handleWalletVerify))
-	mux.HandleFunc("POST /api/auth/wallet-connect/challenge", s.withConfiguredRateLimit(registerRateLimitKey, s.cfg.RateLimit.Register, registerRateLimitMax, registerRateLimitWindow, s.handleWalletChallenge))
-	mux.HandleFunc("POST /api/auth/wallet-connect", s.withConfiguredRateLimit(loginRateLimitKey, s.cfg.RateLimit.Login, loginRateLimitMax, loginRateLimitWindow, s.handleWalletVerify))
+	mux.HandleFunc("POST /auth/wallet/challenge", s.handleWalletChallenge)
+	mux.HandleFunc("POST /auth/wallet/verify", s.handleWalletVerify)
+	mux.HandleFunc("POST /api/auth/wallet-connect/challenge", s.handleWalletChallenge)
+	mux.HandleFunc("POST /api/auth/wallet-connect", s.handleWalletVerify)
 	mux.HandleFunc("GET /members/me", s.withAuth(s.handleMe))
 	mux.HandleFunc("GET /members/me/orders", s.withSubscribed(s.handleMemberOrders))
 	mux.HandleFunc("GET /members/me/invite-usage", s.withSubscribed(s.handleMemberInviteUsage))
@@ -135,6 +136,8 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /admin/menu-changes/{id}/review", s.withAdmin(s.handleAdminReviewMenuChange))
 	mux.HandleFunc("POST /admin/merchant-delists/{id}/review", s.withAdmin(s.handleAdminReviewMerchantDelist))
 	mux.HandleFunc("POST /admin/platform-treasury", s.withAdmin(s.handleAdminUpdatePlatformTreasury))
+	mux.HandleFunc("GET /admin/platform-params", s.withAdmin(s.handleAdminGetPlatformParams))
+	mux.HandleFunc("POST /admin/platform-params", s.withAdmin(s.handleAdminUpdatePlatformParams))
 	mux.HandleFunc("POST /admin/orders/{id}/payout", s.withAdmin(s.handleAdminMarkOrderPaid))
 	mux.HandleFunc("GET /proposals", s.withSubscribed(s.handleListProposals))
 	mux.HandleFunc("POST /proposals", s.withSubscribed(s.handleCreateProposal))
@@ -183,6 +186,15 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleContractInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, s.chainRepo.ContractInfo())
+}
+
+func (s *Server) handlePublicGovernanceParams(w http.ResponseWriter, r *http.Request) {
+	params, err := s.chainRepo.GovernanceParams()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, params)
 }
 
 func (s *Server) handleWalletChallenge(w http.ResponseWriter, r *http.Request) {
@@ -684,15 +696,18 @@ func (s *Server) handleDeleteProposal(w http.ResponseWriter, r *http.Request, me
 
 func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request, memberID int64) {
 	var body struct {
-		Title           string `json:"title"`
-		Description     string `json:"description"`
-		MaxOptions      int64  `json:"maxOptions"`
-		MerchantID      string `json:"merchantId"`
-		ProposalMinutes int64  `json:"proposalMinutes"`
-		VoteMinutes     int64  `json:"voteMinutes"`
-		OrderMinutes    int64  `json:"orderMinutes"`
-		GroupID         int64  `json:"groupId"`
-		UseCreateOrderTicket bool `json:"useCreateOrderTicket"`
+		Title                     string `json:"title"`
+		Description               string `json:"description"`
+		MaxOptions                int64  `json:"maxOptions"`
+		MerchantID                string `json:"merchantId"`
+		MerchantIDs               []string `json:"merchantIds"`
+		UseInitialProposalTickets []bool `json:"useInitialProposalTickets"`
+		ProposalMinutes           int64  `json:"proposalMinutes"`
+		VoteMinutes               int64  `json:"voteMinutes"`
+		OrderMinutes              int64  `json:"orderMinutes"`
+		GroupID                   int64  `json:"groupId"`
+		UseCreateOrderTicket      bool `json:"useCreateOrderTicket"`
+		ChainProposalID           int64 `json:"chainProposalId"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -713,8 +728,27 @@ func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request, me
 	}
 	now := time.Now().In(handlerBusinessLocation())
 	proposalDate := now.Format("2006-01-02")
-	consumeProposalToken := strings.TrimSpace(body.MerchantID) == ""
-	proposal, err := s.proposals.Create(memberID, body.Title, body.Description, "all", "custom", proposalDate, body.MaxOptions, body.ProposalMinutes, body.VoteMinutes, body.OrderMinutes, consumeProposalToken, body.UseCreateOrderTicket)
+	initialMerchantIDs := make([]string, 0, 2)
+	if len(body.MerchantIDs) > 0 {
+		for _, merchantID := range body.MerchantIDs {
+			merchantID = strings.TrimSpace(merchantID)
+			if merchantID == "" {
+				continue
+			}
+			initialMerchantIDs = append(initialMerchantIDs, merchantID)
+		}
+	} else if strings.TrimSpace(body.MerchantID) != "" {
+		initialMerchantIDs = append(initialMerchantIDs, strings.TrimSpace(body.MerchantID))
+	}
+	if len(initialMerchantIDs) == 0 {
+		writeError(w, http.StatusBadRequest, "建立訂單時至少要選擇 1 間店家")
+		return
+	}
+	if len(initialMerchantIDs) > 2 {
+		writeError(w, http.StatusBadRequest, "建立訂單時最多只能選擇 2 間初始提案店家")
+		return
+	}
+	proposal, err := s.proposals.Create(memberID, body.Title, body.Description, "all", "custom", proposalDate, body.MaxOptions, body.ProposalMinutes, body.VoteMinutes, body.OrderMinutes, true, body.UseCreateOrderTicket)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -725,16 +759,34 @@ func (s *Server) handleCreateProposal(w http.ResponseWriter, r *http.Request, me
 			return
 		}
 	}
-	if strings.TrimSpace(body.MerchantID) != "" {
-		if _, err := s.proposals.AddOption(proposal.ID, memberID, body.MerchantID, false); err != nil {
+	if body.ChainProposalID > 0 {
+		if err := s.chainRepo.LinkProposalChain(proposal.ID, body.ChainProposalID); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		proposal, err = s.proposals.Get(proposal.ID)
+	}
+	initialCouponFlags := body.UseInitialProposalTickets
+	for index, merchantID := range initialMerchantIDs {
+		useProposalTicket := false
+		if index < len(initialCouponFlags) {
+			useProposalTicket = initialCouponFlags[index]
+		}
+		option, err := s.proposals.AddOption(proposal.ID, memberID, merchantID, useProposalTicket)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if body.ChainProposalID > 0 {
+			if err := s.chainRepo.LinkProposalOptionChain(proposal.ID, option.ID, int64(index+1)); err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+		}
+	}
+	proposal, err = s.proposals.Get(proposal.ID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	writeJSON(w, http.StatusCreated, anonymizeProposal(proposal, memberID))
 }
@@ -754,8 +806,9 @@ func (s *Server) handleAddOption(w http.ResponseWriter, r *http.Request, memberI
 		return
 	}
 	var body struct {
-		MerchantID string `json:"merchantId"`
-		UseProposalTicket bool `json:"useProposalTicket"`
+		MerchantID        string `json:"merchantId"`
+		UseProposalTicket bool   `json:"useProposalTicket"`
+		ChainOptionIndex  int64  `json:"chainOptionIndex"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -774,6 +827,12 @@ func (s *Server) handleAddOption(w http.ResponseWriter, r *http.Request, memberI
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if body.ChainOptionIndex > 0 {
+		if err := s.chainRepo.LinkProposalOptionChain(proposalID, option.ID, body.ChainOptionIndex); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	writeJSON(w, http.StatusCreated, anonymizeOption(option))
 }
 
@@ -791,7 +850,12 @@ func (s *Server) handleOptionQuote(w http.ResponseWriter, r *http.Request, membe
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, s.proposals.QuoteOption())
+	quote, err := s.proposals.QuoteOption()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, quote)
 }
 
 func (s *Server) handleVote(w http.ResponseWriter, r *http.Request, memberID int64) {
@@ -802,15 +866,15 @@ func (s *Server) handleVote(w http.ResponseWriter, r *http.Request, memberID int
 	}
 	var body struct {
 		OptionID    int64 `json:"optionId"`
-		TokenAmount int64 `json:"tokenAmount"`
+		VoteCount   int64 `json:"voteCount"`
 		UseVoteTicket bool `json:"useVoteTicket"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if body.TokenAmount == 0 && !body.UseVoteTicket {
-		body.TokenAmount = 1
+	if body.VoteCount == 0 && !body.UseVoteTicket {
+		body.VoteCount = 1
 	}
 	if _, err := s.requireProposalAccess(memberID, proposalID); err != nil {
 		if isProposalAccessError(err) {
@@ -820,7 +884,7 @@ func (s *Server) handleVote(w http.ResponseWriter, r *http.Request, memberID int
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	proposal, err := s.proposals.Vote(proposalID, memberID, body.OptionID, body.TokenAmount, body.UseVoteTicket)
+	proposal, err := s.proposals.Vote(proposalID, memberID, body.OptionID, body.VoteCount, body.UseVoteTicket)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -843,16 +907,17 @@ func (s *Server) handleVoteQuote(w http.ResponseWriter, r *http.Request, memberI
 		return
 	}
 	var body struct {
-		TokenAmount int64 `json:"tokenAmount"`
+		VoteCount     int64 `json:"voteCount"`
+		UseVoteTicket bool  `json:"useVoteTicket"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if body.TokenAmount == 0 {
-		body.TokenAmount = 1
+	if body.VoteCount == 0 {
+		body.VoteCount = 1
 	}
-	quote, err := s.proposals.QuoteVote(body.TokenAmount)
+	quote, err := s.proposals.QuoteVote(body.VoteCount, body.UseVoteTicket)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -926,6 +991,7 @@ func (s *Server) handleFinalizeOrder(w http.ResponseWriter, r *http.Request, mem
 	var body struct {
 		ProposalID int64                  `json:"proposalId"`
 		Items      map[string]int64       `json:"items"`
+		EscrowOrderID *int64              `json:"escrowOrderId"`
 		Signature  *models.OrderSignature `json:"signature"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -940,7 +1006,7 @@ func (s *Server) handleFinalizeOrder(w http.ResponseWriter, r *http.Request, mem
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
-	order, err := s.orders.SaveSignedOrder(body.ProposalID, memberID, body.Items, body.Signature)
+	order, err := s.orders.SaveSignedOrder(body.ProposalID, memberID, body.Items, body.Signature, body.EscrowOrderID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

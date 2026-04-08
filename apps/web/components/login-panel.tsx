@@ -101,7 +101,7 @@ export function LoginPanel() {
       <WalletRoleCard
         icon={Users}
         title="一般會員"
-        description="既有會員可直接登入，新用戶先註冊再進入治理與點餐。"
+        description="既有會員可直接登入，新用戶先註冊再進入建立訂單、提案、投票與點餐流程。"
         mode={memberMode}
         displayName={memberDisplayName}
         inviteCode={memberInviteCode}

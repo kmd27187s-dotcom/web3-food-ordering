@@ -3,11 +3,13 @@ package models
 import "time"
 
 type ContractInfo struct {
-	ChainID          int64  `json:"chainId"`
-	OrderContract    string `json:"orderContract"`
-	TokenContract    string `json:"tokenContract"`
-	PlatformTreasury string `json:"platformTreasury"`
-	SignerAddress    string `json:"signerAddress"`
+	ChainID            int64  `json:"chainId"`
+	GovernanceContract string `json:"governanceContract"`
+	OrderEscrowContract string `json:"orderEscrowContract"`
+	OrderContract      string `json:"orderContract"`
+	TokenContract      string `json:"tokenContract"`
+	PlatformTreasury   string `json:"platformTreasury"`
+	SignerAddress      string `json:"signerAddress"`
 }
 
 type Member struct {
@@ -24,12 +26,43 @@ type Member struct {
 	ProposalTicketCount      int64     `json:"proposalTicketCount"`
 	VoteTicketCount          int64     `json:"voteTicketCount"`
 	CreateOrderTicketCount   int64     `json:"createOrderTicketCount"`
+	ProposalCouponCount      int64     `json:"proposalCouponCount"`
+	VoteCouponCount          int64     `json:"voteCouponCount"`
+	CreateOrderCouponCount   int64     `json:"createOrderCouponCount"`
 	ClaimableProposalTickets int64     `json:"claimableProposalTickets"`
 	ClaimableVoteTickets     int64     `json:"claimableVoteTickets"`
 	ClaimableCreateOrderTickets int64  `json:"claimableCreateOrderTickets"`
+	ClaimableProposalCoupons int64     `json:"claimableProposalCoupons"`
+	ClaimableVoteCoupons     int64     `json:"claimableVoteCoupons"`
+	ClaimableCreateOrderCoupons int64  `json:"claimableCreateOrderCoupons"`
 	SubscriptionExpiresAt    time.Time `json:"subscriptionExpiresAt,omitempty"`
 	SubscriptionActive       bool      `json:"subscriptionActive"`
 	CreatedAt                time.Time `json:"createdAt"`
+}
+
+type GovernanceParams struct {
+	CreateFeeWei              int64 `json:"createFeeWei"`
+	ProposalFeeWei            int64 `json:"proposalFeeWei"`
+	VoteFeeWei                int64 `json:"voteFeeWei"`
+	WinnerProposalRefundBps   int64 `json:"winnerProposalRefundBps"`
+	LoserProposalRefundBps    int64 `json:"loserProposalRefundBps"`
+	VoteRefundBps             int64 `json:"voteRefundBps"`
+	WinnerBonusBps            int64 `json:"winnerBonusBps"`
+	LoserBonusBps             int64 `json:"loserBonusBps"`
+	WinnerProposalPoints      int64 `json:"winnerProposalPoints"`
+	WinnerVotePointsPerVote   int64 `json:"winnerVotePointsPerVote"`
+	ProposalDurationMinutes   int64 `json:"proposalDurationMinutes"`
+	VoteDurationMinutes       int64 `json:"voteDurationMinutes"`
+	OrderingDurationMinutes   int64 `json:"orderingDurationMinutes"`
+	DailyCreateCouponCount    int64 `json:"dailyCreateCouponCount"`
+	DailyProposalCouponCount  int64 `json:"dailyProposalCouponCount"`
+	DailyVoteCouponCount      int64 `json:"dailyVoteCouponCount"`
+	PlatformEscrowFeeBps      int64 `json:"platformEscrowFeeBps"`
+	MerchantAcceptTimeoutMins int64 `json:"merchantAcceptTimeoutMins"`
+	MerchantCompleteTimeoutMins int64 `json:"merchantCompleteTimeoutMins"`
+	MemberConfirmTimeoutMins  int64 `json:"memberConfirmTimeoutMins"`
+	GovernanceClaimTimeoutMins int64 `json:"governanceClaimTimeoutMins"`
+	EscrowClaimTimeoutMins    int64 `json:"escrowClaimTimeoutMins"`
 }
 
 type AchievementBuilding struct {
@@ -89,11 +122,27 @@ type Proposal struct {
 	RewardsApplied         bool              `json:"rewardsApplied"`
 	GroupID                int64             `json:"groupId"`
 	CreatedAt              time.Time         `json:"createdAt"`
+	SettledAt              *time.Time        `json:"settledAt,omitempty"`
 	OrderTotalWei          string            `json:"orderTotalWei"`
 	OrderMemberCount       int64             `json:"orderMemberCount"`
+	TotalVoteCount         int64             `json:"totalVoteCount"`
+	CreateFeeWei           int64             `json:"createFeeWei"`
+	CreateFeeRefundWei     int64             `json:"createFeeRefundWei"`
+	CreateFeePlatformWei   int64             `json:"createFeePlatformWei"`
+	ProposalFeeWei         int64             `json:"proposalFeeWei"`
+	VoteFeeWei             int64             `json:"voteFeeWei"`
+	WinnerProposalRefundBps int64            `json:"winnerProposalRefundBps"`
+	LoserProposalRefundBps int64             `json:"loserProposalRefundBps"`
+	VoteRefundBps          int64             `json:"voteRefundBps"`
+	WinnerBonusBps         int64             `json:"winnerBonusBps"`
+	LoserBonusBps          int64             `json:"loserBonusBps"`
+	WinnerProposalPoints   int64             `json:"winnerProposalPoints"`
+	WinnerVotePointsPerVote int64            `json:"winnerVotePointsPerVote"`
+	UsedCreateOrderCoupon  bool              `json:"usedCreateOrderCoupon"`
 	CurrentVoteOptionID    int64             `json:"currentVoteOptionId"`
 	CurrentVoteTokenAmount int64             `json:"currentVoteTokenAmount"`
 	CurrentVoteWeight      int64             `json:"currentVoteWeight"`
+	FailedReason           string            `json:"failedReason,omitempty"`
 	Options                []*ProposalOption `json:"options"`
 	Votes                  []*VoteRecord     `json:"votes"`
 	Orders                 []*Order          `json:"orders"`
@@ -108,6 +157,14 @@ type ProposalOption struct {
 	ProposerName     string `json:"proposerName"`
 	WeightedVotes    int64  `json:"weightedVotes"`
 	TokenStake       int64  `json:"tokenStake"`
+	ProposalFeePaidWei int64 `json:"proposalFeePaidWei"`
+	VoteFeeCollectedWei int64 `json:"voteFeeCollectedWei"`
+	VoteRefundWei    int64  `json:"voteRefundWei"`
+	ProposerRefundWei int64 `json:"proposerRefundWei"`
+	ProposerRewardWei int64 `json:"proposerRewardWei"`
+	FirstProposedAt  string `json:"firstProposedAt"`
+	IsWinner         bool   `json:"isWinner"`
+	UsedProposalCoupon bool `json:"usedProposalCoupon"`
 	PartialRefund    int64  `json:"partialRefund"`
 	WinnerTokenBack  int64  `json:"winnerTokenBack"`
 }
@@ -117,15 +174,20 @@ type VoteRecord struct {
 	MemberName   string `json:"memberName"`
 	OptionID     int64  `json:"optionId"`
 	TokenAmount  int64  `json:"tokenAmount"`
+	FeeAmountWei int64  `json:"feeAmountWei"`
 	VoteWeight   int64  `json:"voteWeight"`
+	VoteCount    int64  `json:"voteCount"`
+	RefundWei    int64  `json:"refundWei"`
 	SubmittedAt  string `json:"submittedAt"`
 	WalletHidden bool   `json:"walletHidden"`
 	UseVoteTicket bool  `json:"useVoteTicket"`
+	UseVoteCoupon bool  `json:"useVoteCoupon"`
 }
 
 type Order struct {
 	ID                    int64           `json:"id"`
 	ProposalID            int64           `json:"proposalId"`
+	EscrowOrderID         *int64          `json:"escrowOrderId,omitempty"`
 	Title                 string          `json:"title"`
 	MemberID              int64           `json:"memberId"`
 	MemberName            string          `json:"memberName"`
@@ -379,6 +441,8 @@ type MerchantDashboard struct {
 type ReadyPayoutOrder struct {
 	OrderID               int64     `json:"orderId"`
 	ProposalID            int64     `json:"proposalId"`
+	EscrowOrderID         *int64    `json:"escrowOrderId,omitempty"`
+	Title                 string    `json:"title"`
 	MemberName            string    `json:"memberName"`
 	MerchantID            string    `json:"merchantId"`
 	MerchantName          string    `json:"merchantName"`
@@ -398,6 +462,7 @@ type AdminDashboard struct {
 	PendingMenuReviews     int64                    `json:"pendingMenuReviews"`
 	PendingMerchantDelists int64                    `json:"pendingMerchantDelists"`
 	PlatformTreasury       string                   `json:"platformTreasury"`
+	GovernanceParams       *GovernanceParams        `json:"governanceParams,omitempty"`
 	MenuChangeRequests     []*MenuChangeRequest     `json:"menuChangeRequests"`
 	MerchantDelistRequests []*MerchantDelistRequest `json:"merchantDelistRequests"`
 	ReadyPayoutOrders      []*ReadyPayoutOrder      `json:"readyPayoutOrders"`

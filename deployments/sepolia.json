@@ -1,0 +1,18 @@
+{
+  "network": "sepolia",
+  "chainId": 11155111,
+  "contracts": {
+    "governance": "0xe4FBAD988f520648dd47518283Ac06bE326a1105",
+    "orderEscrow": "0xc14d75D6f2AdBEA94caBeC83CD508D9c61FDe2ce"
+  },
+  "platformWallet": "0x4A996A04cDF63dAbda75A0aeaA12ca837E00e1ec",
+  "governanceParams": {
+    "createFeeWei": "1000000000000000",
+    "proposalFeeWei": "500000000000000",
+    "voteFeeWei": "200000000000000"
+  },
+  "escrowParams": {
+    "platformEscrowFeeBps": "0",
+    "merchantAcceptTimeoutMins": "1440"
+  }
+}

@@ -66,22 +66,22 @@ type MemberRepo interface {
 
 // ProposalRepo handles proposal, option, and vote persistence.
 type ProposalRepo interface {
-	CreateProposal(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time) (*models.Proposal, error)
-	CreateProposalWithCredit(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time, useTicket bool) (*models.Proposal, error)
+	CreateProposal(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time, params *models.GovernanceParams) (*models.Proposal, error)
+	CreateProposalWithCredit(memberID int64, title, description, merchantGroup, mealPeriod, proposalDate string, maxOptions int64, createdByName string, proposalDeadline, voteDeadline, orderDeadline time.Time, params *models.GovernanceParams, useTicket bool) (*models.Proposal, error)
 	ListProposals() []*models.Proposal
 	GetProposal(id int64) (*models.Proposal, error)
 	DeleteProposalByCreator(proposalID, memberID int64) error
 	// InsertProposalOption atomically deducts tokenCost from member and inserts the option row.
-	InsertProposalOption(proposalID, memberID int64, merchantID, merchantName, proposerName string, tokenCost int64, useTicket bool) (*models.ProposalOption, error)
+	InsertProposalOption(proposalID, memberID int64, merchantID, merchantName, proposerName string, feeWei int64, useTicket bool) (*models.ProposalOption, error)
 	// RecordVote atomically deducts tokenAmount from member, increments weighted_votes, and inserts a vote row.
-	RecordVote(proposalID, memberID, optionID int64, tokenAmount int64, memberDisplayName string, useTicket bool) error
+	RecordVote(proposalID, memberID, optionID int64, voteCount, feeAmountWei int64, memberDisplayName string, useTicket bool) error
 	// ApplySettlementRewards atomically applies member rewards, option refund values, and marks rewards_applied.
 	ApplySettlementRewards(proposalID int64, rewards []MemberReward, optionRefunds []OptionRefund) error
 }
 
 // OrderRepo handles order persistence.
 type OrderRepo interface {
-	SaveOrder(proposalID, memberID int64, quote *models.OrderQuote, sig *models.OrderSignature, memberDisplayName string) (*models.Order, error)
+	SaveOrder(proposalID, memberID int64, quote *models.OrderQuote, sig *models.OrderSignature, memberDisplayName string, escrowOrderID *int64) (*models.Order, error)
 	UpdateOrderStatus(orderID int64, merchantID, status string) (*models.Order, error)
 	UpdateMemberOrderStatus(orderID, memberID int64, status string) (*models.Order, error)
 	UpdateAdminOrderStatus(orderID int64, status string) (*models.Order, error)
@@ -117,6 +117,10 @@ type MerchantRepo interface {
 type ChainRepo interface {
 	ContractInfo() models.ContractInfo
 	SetPlatformTreasury(address string) (models.ContractInfo, error)
+	GovernanceParams() (*models.GovernanceParams, error)
+	SetGovernanceParams(params *models.GovernanceParams) (*models.GovernanceParams, error)
+	LinkProposalChain(localProposalID, chainProposalID int64) error
+	LinkProposalOptionChain(localProposalID, localOptionID, chainOptionIndex int64) error
 	StoreChainEvents(events []*models.ChainEvent, lastSeenBlock uint64, syncErr string) error
 	ChainSyncStatus() (*models.ChainSyncStatus, error)
 	ListChainEvents(limit int) ([]*models.ChainEvent, error)

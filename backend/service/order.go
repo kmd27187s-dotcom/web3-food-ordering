@@ -123,7 +123,7 @@ func (s *OrderService) Sign(proposalID, memberID int64, items map[string]int64, 
 	return quote, sig, nil
 }
 
-func (s *OrderService) SaveSignedOrder(proposalID, memberID int64, items map[string]int64, signature *models.OrderSignature) (*models.Order, error) {
+func (s *OrderService) SaveSignedOrder(proposalID, memberID int64, items map[string]int64, signature *models.OrderSignature, escrowOrderID *int64) (*models.Order, error) {
 	quote, err := s.Quote(proposalID, memberID, items)
 	if err != nil {
 		return nil, err
@@ -135,7 +135,7 @@ func (s *OrderService) SaveSignedOrder(proposalID, memberID int64, items map[str
 			memberDisplayName = member.DisplayName
 		}
 	}
-	return s.orders.SaveOrder(proposalID, memberID, quote, signature, memberDisplayName)
+	return s.orders.SaveOrder(proposalID, memberID, quote, signature, memberDisplayName, escrowOrderID)
 }
 
 func computeOrderHash(proposalID, memberID int64, items any) string {

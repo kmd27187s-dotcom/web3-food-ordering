@@ -20,6 +20,8 @@ type StorageConfig struct {
 type ChainConfig struct {
 	ChainID            int64
 	SignerPrivateKey   string
+	GovernanceContract string
+	OrderEscrowContract string
 	OrderContract      string
 	MembershipToken    string
 	PlatformTreasury   string
@@ -45,6 +47,8 @@ type InactiveGroupConfig struct {
 }
 
 func Load() Config {
+	governanceContract := env("GOVERNANCE_CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000000")
+	orderEscrowContract := env("ORDER_ESCROW_CONTRACT_ADDRESS", env("ORDER_CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000000"))
 	return Config{
 		HTTPAddress: env("HTTP_ADDR", ":8080"),
 		SyncOnStart: env("SYNC_ON_START", "false") == "true",
@@ -56,7 +60,9 @@ func Load() Config {
 		Chain: ChainConfig{
 			ChainID:            envInt64("CHAIN_ID", 11155111),
 			SignerPrivateKey:   os.Getenv("SIGNER_PRIVATE_KEY"),
-			OrderContract:      env("ORDER_CONTRACT_ADDRESS", "0x0000000000000000000000000000000000000000"),
+			GovernanceContract: governanceContract,
+			OrderEscrowContract: orderEscrowContract,
+			OrderContract:      orderEscrowContract,
 			MembershipToken:    env("MEMBERSHIP_TOKEN_ADDRESS", "0x0000000000000000000000000000000000000000"),
 			PlatformTreasury:   env("PLATFORM_TREASURY_ADDRESS", "0x0000000000000000000000000000000000000000"),
 			RPCURL:             env("RPC_URL", ""),

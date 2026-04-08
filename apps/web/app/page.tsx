@@ -13,7 +13,7 @@ const foundations = [
 
 const heroNotes = [
   "提案階段先建立候選餐廳。",
-  "投票階段用 token 權重決定方向。",
+  "投票階段可選擇投幾票，系統即時計算費用。",
   "點餐階段直接跳 MetaMask 完成付款。"
 ] as const;
 
@@ -21,7 +21,7 @@ const roleCards = [
   {
     href: "/member",
     title: "會員入口",
-    body: "治理、投票、點餐與紀錄。",
+    body: "建立訂單、提案、投票、點餐與紀錄。",
     icon: Users
   },
   {
@@ -68,7 +68,7 @@ export default function HomePage() {
               <div className="space-y-5">
                 <p className="meal-kicker">Office dining, coordinated by consensus</p>
                 <h1 className="max-w-4xl font-[var(--font-heading)] text-5xl font-extrabold tracking-[-0.05em] text-balance md:text-7xl">
-                  用治理決定
+                  用共識決定
                   <br />
                   今天吃什麼。
                 </h1>
@@ -130,7 +130,7 @@ export default function HomePage() {
                         </span>
                       </div>
                       <div>
-                        <h2 className="max-w-md text-3xl font-extrabold tracking-[-0.04em]">登入後直接進入治理。</h2>
+                        <h2 className="max-w-md text-3xl font-extrabold tracking-[-0.04em]">登入後直接進入訂單流程。</h2>
                         <div className="mt-5 space-y-3 text-sm text-white/85">
                           {heroNotes.map((item) => (
                             <div key={item} className="flex items-start gap-2">
