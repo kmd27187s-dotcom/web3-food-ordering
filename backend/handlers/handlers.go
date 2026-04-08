@@ -1569,10 +1569,21 @@ func (s *Server) handleSubscriptionSync(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	expiresAt, err := time.Parse(time.RFC3339, body.ExpiresAt)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid expiresAt")
-		return
+	var expiresAt time.Time
+	var err error
+	if strings.TrimSpace(body.ExpiresAt) != "" {
+		expiresAt, err = time.Parse(time.RFC3339, body.ExpiresAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid expiresAt")
+			return
+		}
+	} else {
+		params, paramsErr := s.chainRepo.GovernanceParams()
+		if paramsErr != nil {
+			writeError(w, http.StatusInternalServerError, paramsErr.Error())
+			return
+		}
+		expiresAt = time.Now().Add(time.Duration(params.SubscriptionDurationDays) * 24 * time.Hour)
 	}
 	if err := s.members.SetSubscriptionExpiry(memberID, expiresAt); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

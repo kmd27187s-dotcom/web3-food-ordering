@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { fetchAdminDashboard, fetchContractInfo, markAdminOrderPaid, updatePlatformTreasury, type AdminDashboard, type ContractInfo } from "@/lib/api";
-import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress, toFriendlyWalletError } from "@/lib/chain";
+import { ensureSepoliaClients, isUsableContractAddress, toFriendlyWalletError } from "@/lib/chain";
 import { connectWallet } from "@/lib/wallet-auth";
 
 export function AdminPayouts() {
@@ -46,8 +46,9 @@ export function AdminPayouts() {
       setMessage("請先設定可用的平台中心錢包。");
       return;
     }
-    if (!escrowOrderId || !isUsableContractAddress(contractInfo?.orderEscrowContract)) {
-      setMessage("找不到可用的 escrow 訂單或合約地址。");
+    const order = data?.readyPayoutOrders.find((item) => item.orderId === orderId);
+    if (!order?.merchantPayoutAddress || !isUsableContractAddress(order.merchantPayoutAddress)) {
+      setMessage("找不到可用的店家收款錢包。");
       return;
     }
     setPending(true);
@@ -57,18 +58,16 @@ export function AdminPayouts() {
       if (walletAddress.toLowerCase() !== data.platformTreasury.toLowerCase()) {
         throw new Error("目前連結的 MetaMask 不是已綁定的平台中心錢包。");
       }
-      const txHash = await walletClient.writeContract({
-        address: contractInfo!.orderEscrowContract as `0x${string}`,
-        abi: ESCROW_ABI,
-        functionName: "releasePayout",
-        args: [BigInt(escrowOrderId)],
+      const txHash = await walletClient.sendTransaction({
         account: walletAddress,
-        chain: walletClient.chain
+        chain: walletClient.chain,
+        to: order.merchantPayoutAddress as `0x${string}`,
+        value: BigInt(order.amountWei)
       });
       await publicClient.waitForTransactionReceipt({ hash: txHash });
       await markAdminOrderPaid(orderId);
       await refresh();
-      setMessage("已從 escrow 合約完成正式撥款。");
+      setMessage("已完成鏈上轉帳並更新本地撥款狀態。");
     } catch (error) {
       setMessage(toFriendlyWalletError(error, "平台撥款未成功，請重新操作。"));
     } finally {
@@ -123,7 +122,7 @@ export function AdminPayouts() {
                 </div>
               </div>
               <Button className="mt-4" disabled={pending} onClick={() => handleReleasePayout(order.orderId, order.escrowOrderId)}>
-                從 escrow 合約撥款
+                從平台錢包轉帳撥款
               </Button>
             </div>
           ))}

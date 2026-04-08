@@ -19,11 +19,11 @@ export const GOVERNANCE_ABI = parseAbi([
   "function subscribeMonthly() payable returns (uint256 expiresAt)",
   "function cancelSubscription()",
   "function subscriptionExpiresAt(address member) view returns (uint40)",
-  "event RoundCreated(uint256 indexed roundId, address indexed creator, bytes32 indexed groupKey, uint256 proposalDeadline, uint256 voteDeadline, uint256 orderingDeadline)",
-  "event MerchantProposed(uint256 indexed roundId, uint256 indexed candidateId, bytes32 indexed merchantKey, address proposer, bool usedCoupon)",
-  "event VoteCast(uint256 indexed roundId, uint256 indexed candidateId, address indexed voter, uint256 voteCount, uint256 feeAmountWei, bool usedCoupon)",
+  "event RoundCreated(uint256 indexed roundId, uint256 proposalDeadline, uint256 voteDeadline, uint256 orderingDeadline)",
+  "event MerchantProposed(uint256 indexed roundId, uint256 indexed candidateId, bytes32 indexed merchantKey)",
+  "event VoteCast(uint256 indexed roundId, uint256 indexed candidateId, address indexed voter, uint256 voteCount, bool usedCoupon)",
   "event SubscriptionPaid(address indexed member, uint256 expiresAt)",
-  "event SubscriptionCancelled(address indexed member, uint256 cancelledAt)"
+  "event SubscriptionCancelled(address indexed member)"
 ]);
 
 export const ESCROW_ABI = parseAbi([
@@ -33,12 +33,12 @@ export const ESCROW_ABI = parseAbi([
   "function merchantComplete(uint256 orderId)",
   "function memberConfirmReceived(uint256 orderId)",
   "function releasePayout(uint256 orderId)",
-  "event OrderEscrowOpened(uint256 indexed orderId, uint256 indexed roundId, bytes32 indexed winnerMerchantKey, address merchantWallet, bytes32 groupKey, bytes32 menuSnapshotHash, bytes32 orderDetailHash, bytes32 participantHash, uint256 totalParticipants, uint256 totalQuantity, uint256 totalOrderAmountWei)",
+  "event OrderEscrowOpened(uint256 indexed orderId, uint256 indexed roundId, bytes32 orderDetailHash)",
   "event OrderPaymentSubmitted(uint256 indexed orderId, address indexed payer, uint256 amountWei)",
-  "event MerchantAccepted(uint256 indexed orderId, address indexed merchantWallet)",
-  "event MerchantCompleted(uint256 indexed orderId, address indexed merchantWallet)",
+  "event MerchantAccepted(uint256 indexed orderId)",
+  "event MerchantCompleted(uint256 indexed orderId)",
   "event MemberConfirmed(uint256 indexed orderId, address indexed member)",
-  "event PayoutReleased(uint256 indexed orderId, address indexed merchantWallet, uint256 merchantAmountWei, uint256 platformAmountWei)"
+  "event PayoutReleased(uint256 indexed orderId, uint256 merchantAmountWei, uint256 platformAmountWei)"
 ]);
 
 export const ORDER_ABI = parseAbi([
@@ -97,6 +97,18 @@ export async function ensureSepoliaClients() {
 export async function ensureSepoliaWallet() {
   const { walletClient } = await ensureSepoliaClients();
   return walletClient;
+}
+
+export async function sendNativePayment(to: `0x${string}`, value: bigint) {
+  const { walletClient, publicClient, account } = await ensureSepoliaClients();
+  const hash = await walletClient.sendTransaction({
+    account,
+    chain: walletClient.chain,
+    to,
+    value
+  });
+  await publicClient.waitForTransactionReceipt({ hash });
+  return { hash, account };
 }
 
 export function toStableKey(prefix: string, value: string) {

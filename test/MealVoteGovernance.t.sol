@@ -57,7 +57,7 @@ contract MealVoteGovernanceTest is Test {
         );
 
         assertEq(roundId, 1);
-        (, , address creator, , , , , , , , , , ) = governance.rounds(roundId);
+        (address creator, , , , , , ) = governance.rounds(roundId);
         assertEq(creator, alice);
     }
 
@@ -104,9 +104,9 @@ contract MealVoteGovernanceTest is Test {
         vm.prank(bob);
         governance.castVote{value: 0.4 ether}(roundId, 1, 3, true);
 
-        (uint32 candidateId, uint32 voteCount, bool usedCoupon) = governance.votes(roundId, bob);
-        assertEq(candidateId, 1);
-        assertEq(voteCount, 3);
-        assertTrue(usedCoupon);
+        uint256 packedVote = governance.votes(roundId, bob);
+        assertEq(packedVote & ((uint256(1) << 24) - 1), 1);
+        assertEq((packedVote >> 24) & ((uint256(1) << 24) - 1), 3);
+        assertEq((packedVote >> 48) & 1, 1);
     }
 }

@@ -33,20 +33,11 @@ import {
   voteProposal
 } from "@/lib/api";
 import {
-  ESCROW_ABI,
   ensureSepoliaClients,
-  ensureSepoliaWallet,
   getWalletBalanceWei,
-  GOVERNANCE_ABI,
-  hashParticipantAddresses,
   isUsableContractAddress,
-  ORDER_ABI,
+  sendNativePayment,
   toFriendlyWalletError,
-  toStableKey,
-  toTextHash,
-  waitForEscrowOpened,
-  waitForGovernanceCandidateCreated,
-  waitForGovernanceRoundCreated
 } from "@/lib/chain";
 import { OrderSummaryCard } from "@/components/member-order-shared";
 
@@ -220,40 +211,24 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     setActionPending(true);
     setMessage("");
     try {
-      let chainProposalId: number | undefined;
-      const canUseGovernanceChain = isUsableContractAddress(state.contractInfo?.governanceContract);
       const initialProposalTicketFlags =
         useInitialProposalTickets && (state.member?.proposalCouponCount || 0) > 0
           ? createDraft.merchantIds.map((_, index) => index < (state.member?.proposalCouponCount || 0))
           : createDraft.merchantIds.map(() => false);
-
-      if (canUseGovernanceChain) {
+      if (isUsableContractAddress(state.contractInfo?.platformTreasury) && state.governanceParams) {
         if (!state.governanceParams) {
-          throw new Error("目前無法讀取治理費率參數，暫時不能送出鏈上建立訂單交易。");
+          throw new Error("目前無法讀取費率參數，暫時不能送出付款。");
         }
-        const { walletClient, account } = await ensureSepoliaClients();
         const createFeeWei = BigInt(useCreateOrderTicket ? 0 : state.governanceParams?.createFeeWei || 0);
         const initialProposalFeeWei = createDraft.merchantIds.reduce((total, _merchantId, index) => {
           if (initialProposalTicketFlags[index]) return total;
           return total + BigInt(state.governanceParams?.proposalFeeWei || 0);
         }, 0n);
         const txValueWei = createFeeWei + initialProposalFeeWei;
-        const chainTxHash = await walletClient.writeContract({
-          address: state.contractInfo!.governanceContract as `0x${string}`,
-          abi: GOVERNANCE_ABI,
-          functionName: "createRound",
-          args: [
-            toStableKey("group", createDraft.groupId),
-            toTextHash(createDraft.title.trim()),
-            createDraft.merchantIds.map((merchantId) => toStableKey("merchant", merchantId)) as `0x${string}`[],
-            useCreateOrderTicket,
-            initialProposalTicketFlags
-          ],
-          account,
-          chain: walletClient.chain,
-          value: txValueWei
-        });
-        chainProposalId = await waitForGovernanceRoundCreated(chainTxHash);
+        const { hash: chainTxHash, account } = await sendNativePayment(
+          state.contractInfo!.platformTreasury as `0x${string}`,
+          txValueWei
+        );
         await registerPendingTransaction({
           proposalId: 0,
           action: "create_proposal",
@@ -272,7 +247,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
         orderMinutes: Number(createDraft.orderMinutes),
         groupId: Number(createDraft.groupId),
         useCreateOrderTicket,
-        chainProposalId
+        chainProposalId: undefined
       });
       setCreateDraft((current) => ({ ...defaultCreateDraft, groupId: current.groupId }));
       setCreateMerchantQuery("");
@@ -299,20 +274,12 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     setMessage("");
     try {
       let chainOptionIndex: number | undefined;
-      const canUseGovernanceChain = Boolean(detail.chainProposalId) && isUsableContractAddress(state.contractInfo?.governanceContract);
-      if (canUseGovernanceChain && detail.chainProposalId) {
-        const { walletClient, account } = await ensureSepoliaClients();
-        const value = useProposalTicket ? 0n : BigInt(detail.proposalFeeWei || 0);
-        const txHash = await walletClient.writeContract({
-          address: state.contractInfo!.governanceContract as `0x${string}`,
-          abi: GOVERNANCE_ABI,
-          functionName: "proposeMerchant",
-          args: [BigInt(detail.chainProposalId), toStableKey("merchant", merchantId), useProposalTicket],
-          account,
-          chain: walletClient.chain,
+      if (isUsableContractAddress(state.contractInfo?.platformTreasury)) {
+        const value = BigInt(useProposalTicket ? 0 : detail.proposalFeeWei || 0);
+        const { hash: txHash, account } = await sendNativePayment(
+          state.contractInfo!.platformTreasury as `0x${string}`,
           value
-        });
-        chainOptionIndex = await waitForGovernanceCandidateCreated(txHash);
+        );
         await registerPendingTransaction({
           proposalId: detail.id,
           action: "add_option",
@@ -373,24 +340,14 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     try {
       const option = detail.options.find((item) => item.id === optionId);
       const voteCount = Number(voteTokens || "0");
-      const canUseGovernanceChain =
-        Boolean(detail.chainProposalId) &&
-        Boolean(option?.chainOptionIndex) &&
-        isUsableContractAddress(state.contractInfo?.governanceContract);
-      if (canUseGovernanceChain && detail.chainProposalId && option?.chainOptionIndex) {
-        const { walletClient, account } = await ensureSepoliaClients();
+      if (isUsableContractAddress(state.contractInfo?.platformTreasury)) {
         const actualVoteCount = voteCount;
         const payableVotes = useVoteTicket ? Math.max(actualVoteCount - 1, 0) : actualVoteCount;
         const value = BigInt((detail.voteFeeWei || 0) * payableVotes);
-        const txHash = await walletClient.writeContract({
-          address: state.contractInfo!.governanceContract as `0x${string}`,
-          abi: GOVERNANCE_ABI,
-          functionName: "castVote",
-          args: [BigInt(detail.chainProposalId), BigInt(option.chainOptionIndex), BigInt(actualVoteCount), useVoteTicket],
-          account,
-          chain: walletClient.chain,
+        const { hash: txHash, account } = await sendNativePayment(
+          state.contractInfo!.platformTreasury as `0x${string}`,
           value
-        });
+        );
         await registerPendingTransaction({
           proposalId: detail.id,
           action: "vote",
@@ -437,9 +394,11 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     setMessage("");
     try {
       const result = await signOrder(detail.id, payload);
+      if (!result.signature) {
+        throw new Error("訂單簽章未成功產生，請重新操作。");
+      }
       let escrowOrderId: number | undefined;
-      const walletClient = await ensureSepoliaWallet();
-      const [walletAddress = ""] = await walletClient.getAddresses();
+      const { account: walletAddress } = await ensureSepoliaClients();
       const requiredBalance = BigInt(result.quote.requiredBalanceWei);
       if (walletAddress) {
         const balance = await getWalletBalanceWei(walletAddress);
@@ -448,87 +407,14 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
         }
       }
 
-      const canUseEscrowOrder =
-        Boolean(detail.chainProposalId) &&
-        isUsableContractAddress(state.contractInfo?.orderEscrowContract) &&
-        Boolean(merchant.payoutAddress);
-
-      if (canUseEscrowOrder && detail.chainProposalId) {
-        const { walletClient, account } = await ensureSepoliaClients();
-        const menuSnapshotHash = toTextHash(JSON.stringify(merchant.menu));
-        const orderDetailHash = toTextHash(JSON.stringify({
-          proposalId: detail.id,
-          memberId: state.member?.id,
-          items: payload
-        }));
-        const totalQuantity = Object.values(payload).reduce((sum, quantity) => sum + quantity, 0);
-        const openTxHash = await walletClient.writeContract({
-          address: state.contractInfo!.orderEscrowContract as `0x${string}`,
-          abi: ESCROW_ABI,
-          functionName: "openEscrow",
-          args: [
-            BigInt(detail.chainProposalId),
-            toStableKey("group", String(detail.groupId)),
-            toStableKey("merchant", merchant.id),
-            menuSnapshotHash,
-            orderDetailHash,
-            hashParticipantAddresses([account]),
-            merchant.payoutAddress as `0x${string}`,
-            1n,
-            BigInt(totalQuantity),
-            BigInt(result.quote.subtotalWei)
-          ],
-          account,
-          chain: walletClient.chain
-        });
-        escrowOrderId = await waitForEscrowOpened(openTxHash);
+      if (isUsableContractAddress(state.contractInfo?.platformTreasury)) {
+        const { hash: txHash, account } = await sendNativePayment(
+          state.contractInfo!.platformTreasury as `0x${string}`,
+          BigInt(result.quote.subtotalWei)
+        );
         await registerPendingTransaction({
           proposalId: detail.id,
-          action: "open_escrow",
-          txHash: openTxHash,
-          walletAddress: account,
-          relatedOrder: result.signature?.orderHash
-        }).catch(() => undefined);
-
-        const payTxHash = await walletClient.writeContract({
-          address: state.contractInfo!.orderEscrowContract as `0x${string}`,
-          abi: ESCROW_ABI,
-          functionName: "payForOrder",
-          args: [BigInt(escrowOrderId)],
-          account,
-          chain: walletClient.chain,
-          value: BigInt(result.quote.subtotalWei)
-        });
-        await registerPendingTransaction({
-          proposalId: detail.id,
-          action: "pay_order_escrow",
-          txHash: payTxHash,
-          walletAddress: account,
-          relatedOrder: result.signature?.orderHash
-        }).catch(() => undefined);
-      } else if (detail.chainProposalId && Boolean(result.signature?.signature) && isUsableContractAddress(state.contractInfo?.orderContract) && result.signature) {
-        const walletClient = await ensureSepoliaWallet();
-        const [account] = await walletClient.getAddresses();
-        const valueWei = BigInt(result.quote.subtotalWei);
-        const txHash = await walletClient.writeContract({
-          address: state.contractInfo!.orderContract as `0x${string}`,
-          abi: ORDER_ABI,
-          functionName: "placeOrder",
-          args: [
-            BigInt(detail.chainProposalId),
-            result.signature.orderHash as `0x${string}`,
-            "",
-            BigInt(result.signature.amountWei),
-            BigInt(result.signature.expiry),
-            result.signature.signature as `0x${string}`
-          ],
-          account,
-          chain: walletClient.chain,
-          value: valueWei
-        });
-        await registerPendingTransaction({
-          proposalId: detail.id,
-          action: "place_order",
+          action: "pay_order",
           txHash,
           walletAddress: account,
           relatedOrder: result.signature.orderHash
@@ -538,7 +424,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       await finalizeOrder({
         proposalId: detail.id,
         items: payload,
-        escrowOrderId: canUseEscrowOrder ? escrowOrderId : undefined,
+        escrowOrderId,
         signature: result.signature
       });
       setOrderItems({});
@@ -556,29 +442,6 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     setActionPending(true);
     setMessage("");
     try {
-      const order = detail?.orders.find((item) => item.id === orderId);
-      if (
-        order?.escrowOrderId &&
-        isUsableContractAddress(state.contractInfo?.orderEscrowContract)
-      ) {
-        const { walletClient, publicClient, account } = await ensureSepoliaClients();
-        const txHash = await walletClient.writeContract({
-          address: state.contractInfo!.orderEscrowContract as `0x${string}`,
-          abi: ESCROW_ABI,
-          functionName: "memberConfirmReceived",
-          args: [BigInt(order.escrowOrderId)],
-          account,
-          chain: walletClient.chain
-        });
-        await publicClient.waitForTransactionReceipt({ hash: txHash });
-        await registerPendingTransaction({
-          proposalId: detail?.id || 0,
-          action: "confirm_order_received",
-          txHash,
-          walletAddress: account,
-          relatedOrder: order.orderHash
-        }).catch(() => undefined);
-      }
       await confirmMemberOrder(orderId);
       await refresh();
       setMessage("已確認接收訂單。");
@@ -1089,7 +952,7 @@ function StageDetail(props: {
               <p className="mt-2 text-lg font-semibold">{formatWeiFriendly(selectedSubtotalWei)}</p>
               <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
                 <Wallet className="h-4 w-4" />
-                {isUsableContractAddress(props.contractInfo?.orderEscrowContract) ? "本輪會喚起 MetaMask 進行 Sepolia escrow 合約支付。" : "本輪會先付款到平台中心錢包。"}
+                本輪會先付款到平台中心錢包，鏈上只保留交易紀錄。
               </p>
               <Button className="mt-4" onClick={props.onOrder} disabled={actionPending || !selectedItems.length}>送出點餐並前往錢包支付</Button>
             </div>

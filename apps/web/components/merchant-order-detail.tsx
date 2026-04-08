@@ -13,7 +13,7 @@ import {
   type ContractInfo,
   type Order
 } from "@/lib/api";
-import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress, toFriendlyWalletError } from "@/lib/chain";
+import { toFriendlyWalletError } from "@/lib/chain";
 
 function formatWei(value: string | number) {
   const amount = BigInt(typeof value === "number" ? value : value || "0");
@@ -49,18 +49,6 @@ export function MerchantOrderDetail({ orderId }: { orderId: number }) {
     if (!order) return;
     setPending(true);
     try {
-      if (order.escrowOrderId && isUsableContractAddress(contractInfo?.orderEscrowContract)) {
-        const { walletClient, publicClient, account } = await ensureSepoliaClients();
-        const txHash = await walletClient.writeContract({
-          address: contractInfo!.orderEscrowContract as `0x${string}`,
-          abi: ESCROW_ABI,
-          functionName: "merchantAccept",
-          args: [BigInt(order.escrowOrderId)],
-          account,
-          chain: walletClient.chain
-        });
-        await publicClient.waitForTransactionReceipt({ hash: txHash });
-      }
       await acceptMerchantOrder(order.id);
       await refresh();
       setMessage("訂單已確認接收。");
@@ -75,18 +63,6 @@ export function MerchantOrderDetail({ orderId }: { orderId: number }) {
     if (!order) return;
     setPending(true);
     try {
-      if (order.escrowOrderId && isUsableContractAddress(contractInfo?.orderEscrowContract)) {
-        const { walletClient, publicClient, account } = await ensureSepoliaClients();
-        const txHash = await walletClient.writeContract({
-          address: contractInfo!.orderEscrowContract as `0x${string}`,
-          abi: ESCROW_ABI,
-          functionName: "merchantComplete",
-          args: [BigInt(order.escrowOrderId)],
-          account,
-          chain: walletClient.chain
-        });
-        await publicClient.waitForTransactionReceipt({ hash: txHash });
-      }
       await completeMerchantOrder(order.id);
       await refresh();
       setMessage("已標記為製作完成，等待會員確認。");

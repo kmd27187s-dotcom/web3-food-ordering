@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { confirmMemberOrder, fetchContractInfo, fetchGroupDetail, fetchMyOrderHistory, type ContractInfo, type Order } from "@/lib/api";
-import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress, toFriendlyWalletError } from "@/lib/chain";
+import { toFriendlyWalletError } from "@/lib/chain";
 import { OrderDetailPanel } from "@/components/member-order-shared";
 
 type MemberOrderDetailProps =
@@ -49,18 +49,6 @@ export function MemberOrderDetailView(props: MemberOrderDetailProps) {
     if (!order) return;
     setPending(true);
     try {
-      if (order.escrowOrderId && isUsableContractAddress(contractInfo?.orderEscrowContract)) {
-        const { walletClient, publicClient, account } = await ensureSepoliaClients();
-        const txHash = await walletClient.writeContract({
-          address: contractInfo!.orderEscrowContract as `0x${string}`,
-          abi: ESCROW_ABI,
-          functionName: "memberConfirmReceived",
-          args: [BigInt(order.escrowOrderId)],
-          account,
-          chain: walletClient.chain
-        });
-        await publicClient.waitForTransactionReceipt({ hash: txHash });
-      }
       await confirmMemberOrder(order.id);
       await refresh();
       setMessage("已確認接收訂單。");

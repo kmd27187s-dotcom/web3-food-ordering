@@ -31,7 +31,7 @@ import {
   type ProposalOption,
   voteProposal
 } from "@/lib/api";
-import { ensureSepoliaWallet, getWalletBalanceWei, isUsableContractAddress, ORDER_ABI } from "@/lib/chain";
+import { ensureSepoliaClients, getWalletBalanceWei, isUsableContractAddress } from "@/lib/chain";
 
 type GovernanceState = {
   member: Member | null;
@@ -329,10 +329,6 @@ export function GovernanceBoard() {
     setMessage("");
     try {
       const result = await signOrder(proposal.id, payload);
-      const canUseChainOrder =
-        Boolean(proposal.chainProposalId) &&
-        Boolean(result.signature) &&
-        isUsableContractAddress(state.contractInfo?.orderContract);
       const canUseFallbackWalletPay =
         Boolean(result.signature) &&
         Boolean(state.contractInfo?.platformTreasury) &&
@@ -343,8 +339,7 @@ export function GovernanceBoard() {
         return;
       }
 
-      const walletClient = await ensureSepoliaWallet();
-      const [walletAddress] = await walletClient.getAddresses();
+      const { walletClient, publicClient, account: walletAddress } = await ensureSepoliaClients();
       const walletBalanceWei = await getWalletBalanceWei(walletAddress);
       const requiredBalanceWei = BigInt(result.quote.requiredBalanceWei);
       if (walletBalanceWei < requiredBalanceWei) {
@@ -354,49 +349,16 @@ export function GovernanceBoard() {
         return;
       }
 
-      if (canUseChainOrder && proposal.chainProposalId) {
-        const txHash = await walletClient.writeContract({
-          address: state.contractInfo!.orderContract as `0x${string}`,
-          abi: ORDER_ABI,
-          functionName: "placeOrder",
-          args: [
-            BigInt(proposal.chainProposalId),
-            result.signature.orderHash as `0x${string}`,
-            JSON.stringify(payload),
-            BigInt(result.signature.amountWei),
-            BigInt(result.signature.expiry),
-            result.signature.signature as `0x${string}`
-          ],
-          value: BigInt(result.signature.amountWei),
-          account: walletAddress
-        });
-        await registerPendingTransaction({
-          proposalId: proposal.id,
-          action: "place_order",
-          txHash,
-          walletAddress,
-          relatedOrder: result.signature.orderHash
-        });
-        await finalizeOrder({
-          proposalId: proposal.id,
-          items: payload,
-          signature: result.signature
-        });
-        setOrderItems((current) => ({ ...current, [proposal.id]: {} }));
-        await refresh();
-        setMessage(`已喚起 MetaMask 支付 ${formatWeiFriendly(result.quote.subtotalWei)}，交易送出：${txHash.slice(0, 10)}...`);
-        return;
-      }
-
       if (canUseFallbackWalletPay) {
         const txHash = await walletClient.sendTransaction({
           to: state.contractInfo!.platformTreasury as `0x${string}`,
           value: BigInt(result.quote.subtotalWei),
           account: walletAddress
         });
+        await publicClient.waitForTransactionReceipt({ hash: txHash });
         await registerPendingTransaction({
           proposalId: proposal.id,
-          action: "pay_order_fallback",
+          action: "pay_order",
           txHash,
           walletAddress,
           relatedOrder: result.signature.orderHash
