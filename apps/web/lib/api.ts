@@ -6,7 +6,6 @@ export type Member = {
   registrationInviteCode?: string;
   isAdmin?: boolean;
   points: number;
-  tokenBalance: number;
   proposalTicketCount: number;
   voteTicketCount: number;
   createOrderTicketCount: number;
@@ -100,7 +99,6 @@ export type GroupMemberDetail = {
   displayName: string;
   walletAddress?: string;
   points: number;
-  tokenBalance: number;
   joinedAt: string;
   ordersSubmitted: number;
   votesCast: number;
@@ -297,7 +295,6 @@ export type ContractInfo = {
   governanceContract: string;
   orderEscrowContract: string;
   orderContract: string;
-  tokenContract: string;
   platformTreasury: string;
   signerAddress: string;
 };
@@ -308,7 +305,6 @@ export type LeaderboardEntry = {
   displayName: string;
   avatarUrl?: string;
   points: number;
-  tokenBalance: number;
   buildingName: string;
 };
 
@@ -410,7 +406,6 @@ export type AdminMemberSummary = {
   walletAddress?: string;
   isAdmin: boolean;
   subscriptionActive: boolean;
-  tokenBalance: number;
   points: number;
   createdAt: string;
 };
@@ -449,8 +444,9 @@ export type MemberOrderHistory = {
   orders: Order[];
 };
 
-const TOKEN_KEY = "mealvote.token";
-const LEGACY_TOKEN_KEY = "mealvote.token.local";
+const SESSION_KEY = "mealvote.session";
+const LEGACY_TOKEN_KEY = "mealvote.token";
+const LEGACY_LOCAL_TOKEN_KEY = "mealvote.token.local";
 
 export function getApiBase() {
   return process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8080";
@@ -458,26 +454,32 @@ export function getApiBase() {
 
 export function getStoredToken() {
   if (typeof window === "undefined") return "";
-  const legacyToken = window.localStorage.getItem(TOKEN_KEY) || window.localStorage.getItem(LEGACY_TOKEN_KEY);
-  if (legacyToken && !window.sessionStorage.getItem(TOKEN_KEY)) {
-    window.sessionStorage.setItem(TOKEN_KEY, legacyToken);
-    window.localStorage.removeItem(TOKEN_KEY);
+  const legacyToken =
+    window.sessionStorage.getItem(LEGACY_TOKEN_KEY) ||
+    window.localStorage.getItem(LEGACY_TOKEN_KEY) ||
+    window.localStorage.getItem(LEGACY_LOCAL_TOKEN_KEY);
+  if (legacyToken && !window.sessionStorage.getItem(SESSION_KEY)) {
+    window.sessionStorage.setItem(SESSION_KEY, legacyToken);
+    window.sessionStorage.removeItem(LEGACY_TOKEN_KEY);
     window.localStorage.removeItem(LEGACY_TOKEN_KEY);
+    window.localStorage.removeItem(LEGACY_LOCAL_TOKEN_KEY);
   }
-  return window.sessionStorage.getItem(TOKEN_KEY) || "";
+  return window.sessionStorage.getItem(SESSION_KEY) || "";
 }
 
 export function setStoredToken(token: string) {
   if (typeof window === "undefined") return;
   if (token) {
-    window.sessionStorage.setItem(TOKEN_KEY, token);
-    window.localStorage.removeItem(TOKEN_KEY);
+    window.sessionStorage.setItem(SESSION_KEY, token);
+    window.sessionStorage.removeItem(LEGACY_TOKEN_KEY);
     window.localStorage.removeItem(LEGACY_TOKEN_KEY);
+    window.localStorage.removeItem(LEGACY_LOCAL_TOKEN_KEY);
     return;
   }
-  window.sessionStorage.removeItem(TOKEN_KEY);
-  window.localStorage.removeItem(TOKEN_KEY);
+  window.sessionStorage.removeItem(SESSION_KEY);
+  window.sessionStorage.removeItem(LEGACY_TOKEN_KEY);
   window.localStorage.removeItem(LEGACY_TOKEN_KEY);
+  window.localStorage.removeItem(LEGACY_LOCAL_TOKEN_KEY);
 }
 
 export function clearStoredToken() {
@@ -762,19 +764,6 @@ export async function verifyWalletLogin(payload: {
   return apiRequest<WalletVerifyResponse>("/auth/wallet/verify", {
     method: "POST",
     body: JSON.stringify(payload)
-  });
-}
-
-export async function paySubscription() {
-  return apiRequest<{
-    message: string;
-    tokenBalance: number;
-    subscriptionActive: boolean;
-    subscriptionExpires: string;
-  }>("/subscription/pay", {
-    method: "POST",
-    auth: true,
-    body: JSON.stringify({ tokenAmount: 99 })
   });
 }
 

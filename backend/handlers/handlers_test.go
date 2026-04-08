@@ -703,8 +703,8 @@ func TestRegistrationInviteRewardsCanBeClaimedByInviterAndInvitee(t *testing.T) 
 	if !ok {
 		t.Fatalf("expected dave member payload, got %T", daveVerifyBody["member"])
 	}
-	if daveMember["claimableProposalTickets"] != float64(2) {
-		t.Fatalf("expected dave to receive 2 claimable proposal tickets (daily login + invite), got %+v", daveMember)
+	if daveMember["claimableProposalTickets"] != float64(2) || daveMember["claimableVoteTickets"] != float64(2) || daveMember["claimableCreateOrderTickets"] != float64(2) {
+		t.Fatalf("expected dave to receive 2 claimable coupons of each type (daily login + invite), got %+v", daveMember)
 	}
 
 	aliceAfterInvite := performAuthorizedJSONRequest(t, handler, http.MethodGet, "/members/me", aliceToken, nil)
@@ -712,8 +712,8 @@ func TestRegistrationInviteRewardsCanBeClaimedByInviterAndInvitee(t *testing.T) 
 		t.Fatalf("expected alice member fetch after invite to return 200, got %d: %s", aliceAfterInvite.Code, aliceAfterInvite.Body.String())
 	}
 	aliceAfterBody := decodeJSONBody(t, aliceAfterInvite)
-	if aliceAfterBody["claimableProposalTickets"] != float64(2) {
-		t.Fatalf("expected alice to receive 2 claimable proposal tickets (daily login + invite), got %+v", aliceAfterBody)
+	if aliceAfterBody["claimableProposalTickets"] != float64(2) || aliceAfterBody["claimableVoteTickets"] != float64(2) || aliceAfterBody["claimableCreateOrderTickets"] != float64(2) {
+		t.Fatalf("expected alice to receive 2 claimable coupons of each type (daily login + invite), got %+v", aliceAfterBody)
 	}
 
 	daveClaim := performAuthorizedJSONRequest(t, handler, http.MethodPost, "/members/tickets/claim", daveToken, map[string]any{})
@@ -724,15 +724,18 @@ func TestRegistrationInviteRewardsCanBeClaimedByInviterAndInvitee(t *testing.T) 
 	if daveClaimBody["claimedProposalTickets"] != float64(2) {
 		t.Fatalf("expected dave claim response to report two proposal tickets, got %+v", daveClaimBody)
 	}
+	if daveClaimBody["claimedVoteTickets"] != float64(2) || daveClaimBody["claimedCreateOrderTickets"] != float64(2) {
+		t.Fatalf("expected dave claim response to report two vote and create-order tickets, got %+v", daveClaimBody)
+	}
 	daveClaimMember, ok := daveClaimBody["member"].(map[string]any)
 	if !ok {
 		t.Fatalf("expected claimed member payload, got %T", daveClaimBody["member"])
 	}
-	if daveClaimMember["proposalTicketCount"] != float64(2) {
-		t.Fatalf("expected dave proposal ticket count to be 2 after claim, got %+v", daveClaimMember)
+	if daveClaimMember["proposalTicketCount"] != float64(2) || daveClaimMember["voteTicketCount"] != float64(2) || daveClaimMember["createOrderTicketCount"] != float64(2) {
+		t.Fatalf("expected dave coupon counts to be 2 after claim, got %+v", daveClaimMember)
 	}
-	if daveClaimMember["claimableProposalTickets"] != float64(0) {
-		t.Fatalf("expected dave claimable proposal tickets to be cleared after claim, got %+v", daveClaimMember)
+	if daveClaimMember["claimableProposalTickets"] != float64(0) || daveClaimMember["claimableVoteTickets"] != float64(0) || daveClaimMember["claimableCreateOrderTickets"] != float64(0) {
+		t.Fatalf("expected dave claimable coupons to be cleared after claim, got %+v", daveClaimMember)
 	}
 }
 

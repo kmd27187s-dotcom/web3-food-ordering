@@ -109,7 +109,6 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
           </div>
           <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <Stat label="積分" value={`${state.member.points} pts`} />
-            <Stat label="平台 Token" value={`${state.member.tokenBalance}`} />
             <LinkedStat label="參與群組數" value={`${state.groups.length}`} href="/member/groups" />
             <LinkedStat label="訂單紀錄" value={`${state.orderHistory?.orders.length || 0}`} href="/member/orders" />
             <LinkedStat label="成立中訂單數" value={`${activeProposalCount}`} href="/member/ongoing-orders" />

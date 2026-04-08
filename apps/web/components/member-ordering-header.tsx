@@ -28,7 +28,6 @@ export function MemberOrderingHeader() {
       <div className="meal-glass-card rounded-[1.75rem] p-6">
         <p className="meal-kicker">Status</p>
         <div className="mt-5 grid gap-4 md:grid-cols-2">
-          <Stat label="平台 Token" value={`${member?.tokenBalance || 0}`} />
           <Stat label="我的提案優惠券" value={`${member?.proposalCouponCount || 0} 張`} />
           <Stat label="待領提案優惠券" value={`${member?.claimableProposalCoupons || 0} 張`} />
           <Stat label="我的投票優惠券" value={`${member?.voteCouponCount || 0} 張`} />

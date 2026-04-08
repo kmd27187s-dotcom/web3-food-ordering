@@ -1045,7 +1045,7 @@ function StageDetail(props: {
             <h3 className="text-2xl font-extrabold">獲選店家</h3>
             <div className="mt-6 rounded-[1.2rem] border border-border bg-background/70 p-4">
               <p className="font-semibold">{winner?.merchantName || "尚未決定"}</p>
-              <p className="mt-1 text-sm text-muted-foreground">總票重：{winner?.weightedVotes || 0}</p>
+              <p className="mt-1 text-sm text-muted-foreground">總票數：{winner?.weightedVotes || 0}</p>
             </div>
           </section>
           <section className="meal-panel p-8">
@@ -1102,7 +1102,7 @@ function StageDetail(props: {
                 <div key={option.id} className="rounded-[1.2rem] border border-border bg-background/70 p-4">
                   <div className="flex items-center justify-between gap-3">
                     <p className="font-semibold">{option.merchantName}</p>
-                    <p className="text-sm text-muted-foreground">{option.weightedVotes} 票重</p>
+                    <p className="text-sm text-muted-foreground">{option.weightedVotes} 票</p>
                   </div>
                 </div>
               ))}

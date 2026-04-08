@@ -835,7 +835,11 @@ func (s *PostgresStore) SetSubscriptionExpiry(memberID int64, expiresAt time.Tim
 
 func (s *PostgresStore) AddClaimableTickets(memberID, proposalTickets int64) error {
 	ctx := context.Background()
-	return s.db.WithContext(ctx).Model(&postgresMemberModel{}).Where("id = ?", memberID).Update("claimable_proposal_tickets", gorm.Expr("claimable_proposal_tickets + ?", proposalTickets)).Error
+	return s.db.WithContext(ctx).Model(&postgresMemberModel{}).Where("id = ?", memberID).Updates(map[string]any{
+		"claimable_proposal_tickets":      gorm.Expr("claimable_proposal_tickets + ?", proposalTickets),
+		"claimable_vote_tickets":          gorm.Expr("claimable_vote_tickets + ?", proposalTickets),
+		"claimable_create_order_tickets":  gorm.Expr("claimable_create_order_tickets + ?", proposalTickets),
+	}).Error
 }
 
 func (s *PostgresStore) ClaimTickets(memberID int64) (proposalTickets int64, voteTickets int64, createOrderTickets int64, err error) {
@@ -3132,8 +3136,7 @@ func (s *PostgresStore) GetGroupDetail(groupID, viewerMemberID int64) (*models.G
 			Profile: &models.MemberProfile{
 				Member: profileMember,
 				Stats: map[string]int64{
-					"points":       member.Points,
-					"tokenBalance": member.TokenBalance,
+					"points": member.Points,
 				},
 				History: map[string]int64{
 					"ordersSubmitted":  orders,

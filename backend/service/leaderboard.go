@@ -59,8 +59,7 @@ func (s *LeaderboardService) Profile(memberID int64) (*models.MemberProfile, err
 			"votesCast":        votes,
 		},
 		Stats: map[string]int64{
-			"points":       member.Points,
-			"tokenBalance": member.TokenBalance,
+			"points": member.Points,
 		},
 	}, nil
 }

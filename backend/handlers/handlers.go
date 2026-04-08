@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -36,8 +35,6 @@ const (
 	loginRateLimitWindow      = time.Minute
 	registerRateLimitWindow   = 10 * time.Minute
 	walletLinkRateLimitWindow = time.Minute
-	subscriptionTokenCost     = int64(99)
-	subscriptionDuration      = 30 * 24 * time.Hour
 	defaultUsageLimit         = 50
 	maxUsageLimit             = 200
 )
@@ -172,10 +169,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /groups/{id}/members/{memberId}/remove", s.withSubscribed(s.handleRemoveGroupMember))
 	mux.HandleFunc("POST /groups/{id}/leave", s.withSubscribed(s.handleLeaveGroup))
 	mux.HandleFunc("POST /join/{code}", s.withSubscribed(s.handleJoinGroup))
-	mux.HandleFunc("POST /tokens/claim", s.withAuth(s.handleClaimFaucet))
-	mux.HandleFunc("POST /subscription/pay", s.withAuth(s.handleSubscriptionPay))
 	mux.HandleFunc("POST /subscription/sync", s.withAuth(s.handleSubscriptionSync))
-	mux.HandleFunc("POST /api/members/subscribe", s.withAuth(s.handleSubscriptionPay))
 	mux.HandleFunc("POST /demo/seed", s.handleDemoSeed)
 	mux.HandleFunc("POST /admin/proposals/{id}/advance", s.withAdmin(s.handleAdvanceProposalStage))
 	return withCORS(mux)
@@ -1563,73 +1557,6 @@ func (s *Server) handleLeaveGroup(w http.ResponseWriter, r *http.Request, member
 	writeJSON(w, http.StatusOK, map[string]any{
 		"success": true,
 		"groupId": groupID,
-	})
-}
-
-// ── Faucet handler ────────────────────────────────────────────────────────────
-
-func (s *Server) handleClaimFaucet(w http.ResponseWriter, r *http.Request, memberID int64) {
-	member, err := s.members.GetByID(memberID)
-	if err != nil {
-		writeError(w, http.StatusUnauthorized, "member not found")
-		return
-	}
-	newBalance, err := s.faucetRepo.ClaimFaucet(memberID, member.WalletAddress)
-	if err != nil {
-		if errors.Is(err, repository.ErrAlreadyClaimed) {
-			writeError(w, http.StatusConflict, "already claimed")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"tokensAdded": 100,
-		"newBalance":  newBalance,
-	})
-}
-
-func (s *Server) handleSubscriptionPay(w http.ResponseWriter, r *http.Request, memberID int64) {
-	var body struct {
-		TokenAmount int64 `json:"tokenAmount"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if body.TokenAmount != subscriptionTokenCost {
-		writeError(w, http.StatusBadRequest, "subscription requires exactly 99 tokens")
-		return
-	}
-	member, err := s.members.GetByID(memberID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	base := time.Now().UTC()
-	if member.SubscriptionExpiresAt.After(base) {
-		base = member.SubscriptionExpiresAt
-	}
-	nextExpiry := base.Add(subscriptionDuration)
-	if err := s.faucetRepo.DeductTokensAndSubscribe(memberID, subscriptionTokenCost, nextExpiry); err != nil {
-		log.Printf("CRITICAL: atomic subscription payment failed for member %d: %v", memberID, err)
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if err := s.usageRepo.LogUsage(memberID, 0, "subscribe", "token", "debit", fmt.Sprintf("%d", subscriptionTokenCost), "本地月訂閱", "local"); err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	member, err = s.members.GetByID(memberID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"message":             "subscription activated",
-		"tokenBalance":        member.TokenBalance,
-		"subscriptionActive":  member.SubscriptionActive,
-		"subscriptionExpires": member.SubscriptionExpiresAt,
 	})
 }
 

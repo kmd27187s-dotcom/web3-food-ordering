@@ -54,7 +54,7 @@ const stageMeta: Record<WorkflowStage, { title: string; body: string }> = {
   },
   voting: {
     title: "投票階段",
-    body: "輸入 token 權重後送出。"
+    body: "輸入要投的票數後送出。"
   },
   ordering: {
     title: "點餐階段",
@@ -284,7 +284,7 @@ export function GovernanceBoard() {
     try {
       await voteProposal(proposalId, optionId, tokenAmount);
       await refresh();
-      setMessage(`已送出投票，票重 ${tokenAmount}。`);
+      setMessage(`已送出投票，票數 ${tokenAmount}。`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "投票失敗");
     } finally {
@@ -301,9 +301,9 @@ export function GovernanceBoard() {
     }
     try {
       const quote = await quoteVote(proposalId, tokenAmount);
-      setVoteQuotes((current) => ({ ...current, [proposalId]: `${quote.voteWeight} 票重` }));
+      setVoteQuotes((current) => ({ ...current, [proposalId]: `${quote.voteWeight} 票` }));
     } catch (error) {
-      setVoteQuotes((current) => ({ ...current, [proposalId]: error instanceof Error ? error.message : "無法估算票重" }));
+      setVoteQuotes((current) => ({ ...current, [proposalId]: error instanceof Error ? error.message : "無法估算票數" }));
     }
   }
 
@@ -478,7 +478,6 @@ export function GovernanceBoard() {
             <p>建立訂單、投票、點餐到完成送出訂單，都在同一套流程裡。</p>
           </div>
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <Stat label="我的 Token" value={`${state.member?.tokenBalance || 0}`} />
             <Stat label="我的提案券" value={`${state.member?.proposalTicketCount || 0} 張`} />
             <Stat label="目前群組" value={`${state.groups.length} 個`} />
             <Stat label="鏈上模式" value={isUsableContractAddress(state.contractInfo?.orderContract) ? "Sepolia 已配置" : "本地 fallback"} />
@@ -602,7 +601,7 @@ export function GovernanceBoard() {
               <Button onClick={handleCreateProposal} disabled={actionPending || !createDraft.title.trim() || !createDraft.groupId}>
                 {actionPending ? "處理中..." : "建立本輪訂單"}
               </Button>
-              <p className="text-sm text-muted-foreground">建立 round 消耗 1 token。</p>
+              <p className="text-sm text-muted-foreground">建立訂單時會依平台設定收取建立費。</p>
             </div>
           </section>
 
@@ -647,26 +646,26 @@ export function GovernanceBoard() {
       ) : null}
 
       {activeTab === "voting" ? (
-        <Section title="投票階段" description="輸入 token 權重後送出。">
+        <Section title="投票階段" description="輸入要投的票數後送出。">
           {grouped.voting.length === 0 ? <Empty text="目前沒有進行中的投票期 round。" /> : null}
           <div className="grid gap-5 xl:grid-cols-2">
             {grouped.voting.map((proposal) => (
               <ProposalCard key={proposal.id} proposal={proposal}>
                 <div className="space-y-4">
                       <div className="meal-soft-panel px-4 py-4 text-sm text-muted-foreground">
-                    目前總票重 {safeArray(proposal.options).reduce((sum, option) => sum + option.weightedVotes, 0)}。
+                    目前總票數 {safeArray(proposal.options).reduce((sum, option) => sum + option.weightedVotes, 0)}。
                     {proposal.currentVoteOptionId
-                      ? ` 你目前已投入 ${proposal.currentVoteTokenAmount} Token，個人票重 ${proposal.currentVoteWeight}。`
+                      ? ` 你目前已投出 ${proposal.currentVoteWeight} 票。`
                       : " 你目前還沒有投票。"}
                   </div>
-                  <Field label="這輪投票的 token 權重 (必填)">
+                  <Field label="這輪投幾票 (必填)">
                     <div className="flex gap-3">
                       <input
                         type="number"
                         min={1}
                         className="w-full rounded-2xl border border-border bg-background px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         value={voteTokens[proposal.id] ?? ""}
-                        placeholder="輸入權重"
+                        placeholder="輸入票數"
                         onChange={(event) => setVoteTokens((current) => ({ ...current, [proposal.id]: event.target.value }))}
                       />
                       <Button variant="secondary" onClick={() => handleVoteQuote(proposal.id)}>
@@ -681,7 +680,7 @@ export function GovernanceBoard() {
                         <div className="flex items-center justify-between gap-4">
                           <div>
                             <p className="font-semibold">{option.merchantName}</p>
-                            <p className="text-sm text-muted-foreground">目前 {option.weightedVotes} 票重</p>
+                            <p className="text-sm text-muted-foreground">目前 {option.weightedVotes} 票</p>
                           </div>
                           <Button onClick={() => handleVote(proposal.id, option.id)} disabled={actionPending || proposal.currentVoteOptionId > 0}>
                             投給這家
@@ -933,7 +932,7 @@ function OptionList({ options, showVoteWeight = true }: { options: ProposalOptio
               <p className="font-semibold">{option.merchantName}</p>
               <p className="text-sm text-muted-foreground">{option.merchantId}</p>
             </div>
-            {showVoteWeight ? <span className="text-sm text-muted-foreground">{option.weightedVotes} 票重</span> : null}
+            {showVoteWeight ? <span className="text-sm text-muted-foreground">{option.weightedVotes} 票</span> : null}
           </div>
         </div>
       ))}

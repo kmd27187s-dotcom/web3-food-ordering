@@ -23,7 +23,6 @@ type Client struct {
 	chainID    int64
 	governance common.Address
 	contract   common.Address
-	token      common.Address
 	treasury   common.Address
 	signer     common.Address
 	signExpiry int64
@@ -55,7 +54,6 @@ func NewClient(cfg config.ChainConfig) (*Client, error) {
 		chainID:    cfg.ChainID,
 		governance: common.HexToAddress(cfg.GovernanceContract),
 		contract:   common.HexToAddress(cfg.OrderContract),
-		token:      common.HexToAddress(cfg.MembershipToken),
 		treasury:   common.HexToAddress(cfg.PlatformTreasury),
 		signer:     crypto.PubkeyToAddress(*publicKey),
 		signExpiry: cfg.SignatureExpirySec,
@@ -70,7 +68,6 @@ func (c *Client) ContractInfo() models.ContractInfo {
 		GovernanceContract: c.governance.Hex(),
 		OrderEscrowContract: c.contract.Hex(),
 		OrderContract:      c.contract.Hex(),
-		TokenContract:      c.token.Hex(),
 		PlatformTreasury:   c.treasury.Hex(),
 		SignerAddress:      c.signer.Hex(),
 	}
@@ -109,7 +106,7 @@ func (c *Client) SignOrder(proposalID int64, memberWallet string, orderHash stri
 		Digest:          orderDigest.Hex(),
 		SignerAddress:   c.signer.Hex(),
 		ContractAddress: c.contract.Hex(),
-		TokenAddress:    c.token.Hex(),
+		TokenAddress:    common.Address{}.Hex(),
 	}, nil
 }
 

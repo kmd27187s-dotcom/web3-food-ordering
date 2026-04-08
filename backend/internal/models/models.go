@@ -7,7 +7,6 @@ type ContractInfo struct {
 	GovernanceContract string `json:"governanceContract"`
 	OrderEscrowContract string `json:"orderEscrowContract"`
 	OrderContract      string `json:"orderContract"`
-	TokenContract      string `json:"tokenContract"`
 	PlatformTreasury   string `json:"platformTreasury"`
 	SignerAddress      string `json:"signerAddress"`
 }
@@ -22,7 +21,7 @@ type Member struct {
 	RegistrationInviteCode   string    `json:"registrationInviteCode,omitempty"`
 	IsAdmin                  bool      `json:"isAdmin"`
 	Points                   int64     `json:"points"`
-	TokenBalance             int64     `json:"tokenBalance"`
+	TokenBalance             int64     `json:"-"`
 	ProposalTicketCount      int64     `json:"proposalTicketCount"`
 	VoteTicketCount          int64     `json:"voteTicketCount"`
 	CreateOrderTicketCount   int64     `json:"createOrderTicketCount"`
@@ -242,7 +241,7 @@ type LeaderboardEntry struct {
 	DisplayName  string `json:"displayName"`
 	AvatarURL    string `json:"avatarUrl"`
 	Points       int64  `json:"points"`
-	TokenBalance int64  `json:"tokenBalance"`
+	TokenBalance int64  `json:"-"`
 	BuildingName string `json:"buildingName"`
 }
 
@@ -354,7 +353,7 @@ type GroupMemberDetail struct {
 	DisplayName         string                `json:"displayName"`
 	WalletAddress       string                `json:"walletAddress,omitempty"`
 	Points              int64                 `json:"points"`
-	TokenBalance        int64                 `json:"tokenBalance"`
+	TokenBalance        int64                 `json:"-"`
 	JoinedAt            string                `json:"joinedAt"`
 	OrdersSubmitted     int64                 `json:"ordersSubmitted"`
 	VotesCast           int64                 `json:"votesCast"`
@@ -477,7 +476,7 @@ type AdminMemberSummary struct {
 	WalletAddress      string    `json:"walletAddress,omitempty"`
 	IsAdmin            bool      `json:"isAdmin"`
 	SubscriptionActive bool      `json:"subscriptionActive"`
-	TokenBalance       int64     `json:"tokenBalance"`
+	TokenBalance       int64     `json:"-"`
 	Points             int64     `json:"points"`
 	CreatedAt          time.Time `json:"createdAt"`
 }

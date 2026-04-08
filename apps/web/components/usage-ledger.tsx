@@ -49,7 +49,7 @@ export function UsageLedger({ initialTab = "usage" }: { initialTab?: LedgerTab }
         <div className="meal-section-heading max-w-none">
           <p className="meal-kicker">Usage ledger</p>
           <h1>使用紀錄</h1>
-          <p>查看平台 Token、三種優惠券與個人邀請碼使用紀錄。</p>
+          <p>查看三種優惠券、鏈上付款與個人邀請碼使用紀錄。</p>
         </div>
         <Button variant="secondary" onClick={refresh} disabled={loading}>
           {loading ? "更新中..." : "重新整理"}
@@ -148,7 +148,7 @@ function humanizeAction(action: string) {
     cancel_order: "取消訂單",
     subscribe: "月訂閱",
     settlement_reward: "結算獎勵",
-    claim_faucet: "領取 Token",
+    claim_faucet: "舊版獎勵紀錄",
     claim_ticket_reward: "領取提案優惠券",
     claim_order_ticket_reward: "領取建立訂單優惠券",
     vote_coupon: "使用投票優惠券",
@@ -160,7 +160,7 @@ function humanizeAction(action: string) {
 }
 
 function formatAssetLabel(assetType: string) {
-  if (assetType === "token") return "Token";
+  if (assetType === "token") return "舊版資產紀錄";
   if (assetType === "native") return "ETH";
   if (assetType === "proposal_ticket") return "提案優惠券";
   if (assetType === "vote_ticket") return "投票優惠券";
