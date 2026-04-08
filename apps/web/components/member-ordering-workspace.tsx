@@ -41,7 +41,9 @@ import {
   hashParticipantAddresses,
   isUsableContractAddress,
   ORDER_ABI,
+  assertGasUnderCap,
   toFriendlyWalletError,
+  toFriendlySimulationError,
   toStableKey,
   toTextHash,
   waitForEscrowOpened,
@@ -231,13 +233,34 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
         if (!state.governanceParams) {
           throw new Error("目前無法讀取治理費率參數，暫時不能送出鏈上建立訂單交易。");
         }
-        const { walletClient, account } = await ensureSepoliaClients();
+        const { walletClient, publicClient, account } = await ensureSepoliaClients();
         const createFeeWei = BigInt(useCreateOrderTicket ? 0 : state.governanceParams?.createFeeWei || 0);
         const initialProposalFeeWei = createDraft.merchantIds.reduce((total, _merchantId, index) => {
           if (initialProposalTicketFlags[index]) return total;
           return total + BigInt(state.governanceParams?.proposalFeeWei || 0);
         }, 0n);
         const txValueWei = createFeeWei + initialProposalFeeWei;
+        let estimatedGas: bigint;
+        try {
+          const simulation = await publicClient.simulateContract({
+            address: state.contractInfo!.governanceContract as `0x${string}`,
+            abi: GOVERNANCE_ABI,
+            functionName: "createRound",
+            args: [
+              toStableKey("group", createDraft.groupId),
+              toTextHash(createDraft.title.trim()),
+              createDraft.merchantIds.map((merchantId) => toStableKey("merchant", merchantId)) as `0x${string}`[],
+              useCreateOrderTicket,
+              initialProposalTicketFlags
+            ],
+            account,
+            value: txValueWei
+          });
+          estimatedGas = simulation.request.gas ?? (await publicClient.estimateContractGas(simulation.request));
+        } catch (error) {
+          throw new Error(toFriendlySimulationError(error, "建立訂單交易模擬失敗，通常代表這筆交易會 revert。"));
+        }
+        assertGasUnderCap(estimatedGas);
         const chainTxHash = await walletClient.writeContract({
           address: state.contractInfo!.governanceContract as `0x${string}`,
           abi: GOVERNANCE_ABI,
@@ -251,7 +274,8 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           ],
           account,
           chain: walletClient.chain,
-          value: txValueWei
+          value: txValueWei,
+          gas: (estimatedGas * 12n) / 10n
         });
         chainProposalId = await waitForGovernanceRoundCreated(chainTxHash);
         await registerPendingTransaction({
@@ -301,8 +325,23 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       let chainOptionIndex: number | undefined;
       const canUseGovernanceChain = Boolean(detail.chainProposalId) && isUsableContractAddress(state.contractInfo?.governanceContract);
       if (canUseGovernanceChain && detail.chainProposalId) {
-        const { walletClient, account } = await ensureSepoliaClients();
+        const { walletClient, publicClient, account } = await ensureSepoliaClients();
         const value = useProposalTicket ? 0n : BigInt(detail.proposalFeeWei || 0);
+        let estimatedGas: bigint;
+        try {
+          const simulation = await publicClient.simulateContract({
+            address: state.contractInfo!.governanceContract as `0x${string}`,
+            abi: GOVERNANCE_ABI,
+            functionName: "proposeMerchant",
+            args: [BigInt(detail.chainProposalId), toStableKey("merchant", merchantId), useProposalTicket],
+            account,
+            value
+          });
+          estimatedGas = simulation.request.gas ?? (await publicClient.estimateContractGas(simulation.request));
+        } catch (error) {
+          throw new Error(toFriendlySimulationError(error, "提案店家交易模擬失敗，通常代表這筆交易會 revert。"));
+        }
+        assertGasUnderCap(estimatedGas);
         const txHash = await walletClient.writeContract({
           address: state.contractInfo!.governanceContract as `0x${string}`,
           abi: GOVERNANCE_ABI,
@@ -310,7 +349,8 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           args: [BigInt(detail.chainProposalId), toStableKey("merchant", merchantId), useProposalTicket],
           account,
           chain: walletClient.chain,
-          value
+          value,
+          gas: (estimatedGas * 12n) / 10n
         });
         chainOptionIndex = await waitForGovernanceCandidateCreated(txHash);
         await registerPendingTransaction({
@@ -378,10 +418,25 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
         Boolean(option?.chainOptionIndex) &&
         isUsableContractAddress(state.contractInfo?.governanceContract);
       if (canUseGovernanceChain && detail.chainProposalId && option?.chainOptionIndex) {
-        const { walletClient, account } = await ensureSepoliaClients();
+        const { walletClient, publicClient, account } = await ensureSepoliaClients();
         const actualVoteCount = voteCount;
         const payableVotes = useVoteTicket ? Math.max(actualVoteCount - 1, 0) : actualVoteCount;
         const value = BigInt((detail.voteFeeWei || 0) * payableVotes);
+        let estimatedGas: bigint;
+        try {
+          const simulation = await publicClient.simulateContract({
+            address: state.contractInfo!.governanceContract as `0x${string}`,
+            abi: GOVERNANCE_ABI,
+            functionName: "castVote",
+            args: [BigInt(detail.chainProposalId), BigInt(option.chainOptionIndex), BigInt(actualVoteCount), useVoteTicket],
+            account,
+            value
+          });
+          estimatedGas = simulation.request.gas ?? (await publicClient.estimateContractGas(simulation.request));
+        } catch (error) {
+          throw new Error(toFriendlySimulationError(error, "投票交易模擬失敗，通常代表這筆交易會 revert。"));
+        }
+        assertGasUnderCap(estimatedGas);
         const txHash = await walletClient.writeContract({
           address: state.contractInfo!.governanceContract as `0x${string}`,
           abi: GOVERNANCE_ABI,
@@ -389,7 +444,8 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           args: [BigInt(detail.chainProposalId), BigInt(option.chainOptionIndex), BigInt(actualVoteCount), useVoteTicket],
           account,
           chain: walletClient.chain,
-          value
+          value,
+          gas: (estimatedGas * 12n) / 10n
         });
         await registerPendingTransaction({
           proposalId: detail.id,
@@ -454,7 +510,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
         Boolean(merchant.payoutAddress);
 
       if (canUseEscrowOrder && detail.chainProposalId) {
-        const { walletClient, account } = await ensureSepoliaClients();
+        const { walletClient, publicClient, account } = await ensureSepoliaClients();
         const menuSnapshotHash = toTextHash(JSON.stringify(merchant.menu));
         const orderDetailHash = toTextHash(JSON.stringify({
           proposalId: detail.id,
@@ -462,6 +518,31 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           items: payload
         }));
         const totalQuantity = Object.values(payload).reduce((sum, quantity) => sum + quantity, 0);
+        let estimatedOpenGas: bigint;
+        try {
+          const simulation = await publicClient.simulateContract({
+            address: state.contractInfo!.orderEscrowContract as `0x${string}`,
+            abi: ESCROW_ABI,
+            functionName: "openEscrow",
+            args: [
+              BigInt(detail.chainProposalId),
+              toStableKey("group", String(detail.groupId)),
+              toStableKey("merchant", merchant.id),
+              menuSnapshotHash,
+              orderDetailHash,
+              hashParticipantAddresses([account]),
+              merchant.payoutAddress as `0x${string}`,
+              1n,
+              BigInt(totalQuantity),
+              BigInt(result.quote.subtotalWei)
+            ],
+            account
+          });
+          estimatedOpenGas = simulation.request.gas ?? (await publicClient.estimateContractGas(simulation.request));
+        } catch (error) {
+          throw new Error(toFriendlySimulationError(error, "開啟 escrow 交易模擬失敗，通常代表這筆交易會 revert。"));
+        }
+        assertGasUnderCap(estimatedOpenGas);
         const openTxHash = await walletClient.writeContract({
           address: state.contractInfo!.orderEscrowContract as `0x${string}`,
           abi: ESCROW_ABI,
@@ -479,7 +560,8 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
             BigInt(result.quote.subtotalWei)
           ],
           account,
-          chain: walletClient.chain
+          chain: walletClient.chain,
+          gas: (estimatedOpenGas * 12n) / 10n
         });
         escrowOrderId = await waitForEscrowOpened(openTxHash);
         await registerPendingTransaction({
@@ -490,6 +572,21 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           relatedOrder: result.signature?.orderHash
         }).catch(() => undefined);
 
+        let estimatedPayGas: bigint;
+        try {
+          const simulation = await publicClient.simulateContract({
+            address: state.contractInfo!.orderEscrowContract as `0x${string}`,
+            abi: ESCROW_ABI,
+            functionName: "payForOrder",
+            args: [BigInt(escrowOrderId)],
+            account,
+            value: BigInt(result.quote.subtotalWei)
+          });
+          estimatedPayGas = simulation.request.gas ?? (await publicClient.estimateContractGas(simulation.request));
+        } catch (error) {
+          throw new Error(toFriendlySimulationError(error, "escrow 付款交易模擬失敗，通常代表這筆交易會 revert。"));
+        }
+        assertGasUnderCap(estimatedPayGas);
         const payTxHash = await walletClient.writeContract({
           address: state.contractInfo!.orderEscrowContract as `0x${string}`,
           abi: ESCROW_ABI,
@@ -497,7 +594,8 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           args: [BigInt(escrowOrderId)],
           account,
           chain: walletClient.chain,
-          value: BigInt(result.quote.subtotalWei)
+          value: BigInt(result.quote.subtotalWei),
+          gas: (estimatedPayGas * 12n) / 10n
         });
         await registerPendingTransaction({
           proposalId: detail.id,
@@ -507,9 +605,30 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           relatedOrder: result.signature?.orderHash
         }).catch(() => undefined);
       } else if (detail.chainProposalId && Boolean(result.signature?.signature) && isUsableContractAddress(state.contractInfo?.orderContract) && result.signature) {
-        const walletClient = await ensureSepoliaWallet();
-        const [account] = await walletClient.getAddresses();
+        const { walletClient, publicClient, account } = await ensureSepoliaClients();
         const valueWei = BigInt(result.quote.subtotalWei);
+        let estimatedGas: bigint;
+        try {
+          const simulation = await publicClient.simulateContract({
+            address: state.contractInfo!.orderContract as `0x${string}`,
+            abi: ORDER_ABI,
+            functionName: "placeOrder",
+            args: [
+              BigInt(detail.chainProposalId),
+              result.signature.orderHash as `0x${string}`,
+              "",
+              BigInt(result.signature.amountWei),
+              BigInt(result.signature.expiry),
+              result.signature.signature as `0x${string}`
+            ],
+            account,
+            value: valueWei
+          });
+          estimatedGas = simulation.request.gas ?? (await publicClient.estimateContractGas(simulation.request));
+        } catch (error) {
+          throw new Error(toFriendlySimulationError(error, "點餐付款交易模擬失敗，通常代表這筆交易會 revert。"));
+        }
+        assertGasUnderCap(estimatedGas);
         const txHash = await walletClient.writeContract({
           address: state.contractInfo!.orderContract as `0x${string}`,
           abi: ORDER_ABI,
@@ -524,7 +643,8 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           ],
           account,
           chain: walletClient.chain,
-          value: valueWei
+          value: valueWei,
+          gas: (estimatedGas * 12n) / 10n
         });
         await registerPendingTransaction({
           proposalId: detail.id,
@@ -562,13 +682,28 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
         isUsableContractAddress(state.contractInfo?.orderEscrowContract)
       ) {
         const { walletClient, publicClient, account } = await ensureSepoliaClients();
+        let estimatedGas: bigint;
+        try {
+          const simulation = await publicClient.simulateContract({
+            address: state.contractInfo!.orderEscrowContract as `0x${string}`,
+            abi: ESCROW_ABI,
+            functionName: "memberConfirmReceived",
+            args: [BigInt(order.escrowOrderId)],
+            account
+          });
+          estimatedGas = simulation.request.gas ?? (await publicClient.estimateContractGas(simulation.request));
+        } catch (error) {
+          throw new Error(toFriendlySimulationError(error, "確認收貨交易模擬失敗，通常代表這筆交易會 revert。"));
+        }
+        assertGasUnderCap(estimatedGas);
         const txHash = await walletClient.writeContract({
           address: state.contractInfo!.orderEscrowContract as `0x${string}`,
           abi: ESCROW_ABI,
           functionName: "memberConfirmReceived",
           args: [BigInt(order.escrowOrderId)],
           account,
-          chain: walletClient.chain
+          chain: walletClient.chain,
+          gas: (estimatedGas * 12n) / 10n
         });
         await publicClient.waitForTransactionReceipt({ hash: txHash });
         await registerPendingTransaction({

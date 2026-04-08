@@ -31,7 +31,15 @@ import {
   type ProposalOption,
   voteProposal
 } from "@/lib/api";
-import { ensureSepoliaWallet, getWalletBalanceWei, isUsableContractAddress, ORDER_ABI } from "@/lib/chain";
+import {
+  assertGasUnderCap,
+  ensureSepoliaClients,
+  ensureSepoliaWallet,
+  getWalletBalanceWei,
+  isUsableContractAddress,
+  ORDER_ABI,
+  toFriendlySimulationError
+} from "@/lib/chain";
 
 type GovernanceState = {
   member: Member | null;
@@ -355,6 +363,29 @@ export function GovernanceBoard() {
       }
 
       if (canUseChainOrder && proposal.chainProposalId) {
+        const { publicClient } = await ensureSepoliaClients();
+        let estimatedGas: bigint;
+        try {
+          const simulation = await publicClient.simulateContract({
+            address: state.contractInfo!.orderContract as `0x${string}`,
+            abi: ORDER_ABI,
+            functionName: "placeOrder",
+            args: [
+              BigInt(proposal.chainProposalId),
+              result.signature.orderHash as `0x${string}`,
+              JSON.stringify(payload),
+              BigInt(result.signature.amountWei),
+              BigInt(result.signature.expiry),
+              result.signature.signature as `0x${string}`
+            ],
+            account: walletAddress,
+            value: BigInt(result.signature.amountWei)
+          });
+          estimatedGas = simulation.request.gas ?? (await publicClient.estimateContractGas(simulation.request));
+        } catch (error) {
+          throw new Error(toFriendlySimulationError(error, "點餐付款交易模擬失敗，通常代表這筆交易會 revert。"));
+        }
+        assertGasUnderCap(estimatedGas);
         const txHash = await walletClient.writeContract({
           address: state.contractInfo!.orderContract as `0x${string}`,
           abi: ORDER_ABI,
@@ -368,7 +399,8 @@ export function GovernanceBoard() {
             result.signature.signature as `0x${string}`
           ],
           value: BigInt(result.signature.amountWei),
-          account: walletAddress
+          account: walletAddress,
+          gas: (estimatedGas * 12n) / 10n
         });
         await registerPendingTransaction({
           proposalId: proposal.id,

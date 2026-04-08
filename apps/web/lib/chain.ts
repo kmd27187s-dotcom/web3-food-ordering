@@ -46,6 +46,7 @@ export const ORDER_ABI = parseAbi([
 ]);
 
 export const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+export const TX_GAS_CAP = 16_777_216n;
 
 type InjectedEthereum = {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>;
@@ -97,6 +98,14 @@ export async function ensureSepoliaClients() {
 export async function ensureSepoliaWallet() {
   const { walletClient } = await ensureSepoliaClients();
   return walletClient;
+}
+
+export function assertGasUnderCap(gas: bigint) {
+  if (gas > TX_GAS_CAP) {
+    throw new Error(
+      `交易 gas 估算過高（${gas.toString()}），已超過目前 RPC 的上限（${TX_GAS_CAP.toString()}）。這通常代表交易會 revert，或 RPC/錢包估算異常。`
+    );
+  }
 }
 
 export function toStableKey(prefix: string, value: string) {
@@ -208,4 +217,13 @@ export function toFriendlyWalletError(error: unknown, fallback = "付款未成�
     return fallback;
   }
   return error instanceof Error ? error.message : fallback;
+}
+
+export function toFriendlySimulationError(error: unknown, fallback = "交易模擬失敗，通常代表這筆交易會在鏈上 revert。") {
+  if (error instanceof Error) {
+    // viem errors often include useful revert context in message.
+    return error.message || fallback;
+  }
+  const text = String(error || "");
+  return text ? text : fallback;
 }
