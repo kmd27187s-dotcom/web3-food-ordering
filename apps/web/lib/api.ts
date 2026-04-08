@@ -27,6 +27,8 @@ export type GovernanceParams = {
   createFeeWei: number;
   proposalFeeWei: number;
   voteFeeWei: number;
+  subscriptionFeeWei: number;
+  subscriptionDurationDays: number;
   winnerProposalRefundBps: number;
   loserProposalRefundBps: number;
   voteRefundBps: number;
@@ -773,6 +775,18 @@ export async function paySubscription() {
     method: "POST",
     auth: true,
     body: JSON.stringify({ tokenAmount: 99 })
+  });
+}
+
+export async function syncSubscription(payload: {
+  txHash: string;
+  amountWei: string;
+  expiresAt: string;
+}) {
+  return apiRequest<Member>("/subscription/sync", {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify(payload)
   });
 }
 

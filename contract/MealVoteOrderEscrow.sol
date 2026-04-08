@@ -22,27 +22,19 @@ contract MealVoteOrderEscrow {
     }
 
     struct OrderEscrow {
-        uint256 roundId;
         bytes32 groupKey;
         bytes32 winnerMerchantKey;
         bytes32 menuSnapshotHash;
         bytes32 orderDetailHash;
+        bytes32 participantHash;
         address merchantWallet;
-        address payer;
-        address[] participantAddresses;
-        uint256 totalParticipants;
-        uint256 totalQuantity;
-        uint256 totalOrderAmountWei;
-        uint256 submittedAt;
-        uint256 merchantAcceptedAt;
-        uint256 merchantCompletedAt;
-        uint256 memberConfirmedAt;
-        uint256 paidOutAt;
-        uint256 merchantAmountWei;
-        uint256 platformAmountWei;
+        uint64 roundId;
+        uint40 submittedAt;
+        uint32 totalParticipants;
+        uint32 totalQuantity;
+        uint16 platformFeeBpsSnapshot;
+        uint128 totalOrderAmountWei;
         EscrowStatus status;
-        bool payoutReleased;
-        bool paused;
     }
 
     address public owner;
@@ -52,6 +44,7 @@ contract MealVoteOrderEscrow {
 
     mapping(uint256 => OrderEscrow) public escrows;
     mapping(uint256 => mapping(address => uint256)) public memberPaidWei;
+    mapping(uint256 => bool) public pausedEscrows;
 
     event EscrowParamsUpdated(address indexed updatedBy);
     event OrderEscrowOpened(uint256 indexed orderId, uint256 indexed roundId, bytes32 indexed winnerMerchantKey, address merchantWallet);
@@ -88,8 +81,9 @@ contract MealVoteOrderEscrow {
         bytes32 winnerMerchantKey,
         bytes32 menuSnapshotHash,
         bytes32 orderDetailHash,
+        bytes32 participantHash,
         address merchantWallet,
-        address[] calldata participantAddresses,
+        uint256 totalParticipants,
         uint256 totalQuantity,
         uint256 totalOrderAmountWei
     ) external onlyOwner returns (uint256 orderId) {
@@ -97,17 +91,18 @@ contract MealVoteOrderEscrow {
         orderId = ++orderEscrowCount;
 
         OrderEscrow storage escrow = escrows[orderId];
-        escrow.roundId = roundId;
+        escrow.roundId = uint64(roundId);
         escrow.groupKey = groupKey;
         escrow.winnerMerchantKey = winnerMerchantKey;
         escrow.menuSnapshotHash = menuSnapshotHash;
         escrow.orderDetailHash = orderDetailHash;
+        escrow.participantHash = participantHash;
         escrow.merchantWallet = merchantWallet;
-        escrow.participantAddresses = participantAddresses;
-        escrow.totalParticipants = participantAddresses.length;
-        escrow.totalQuantity = totalQuantity;
-        escrow.totalOrderAmountWei = totalOrderAmountWei;
-        escrow.submittedAt = block.timestamp;
+        escrow.totalParticipants = uint32(totalParticipants);
+        escrow.totalQuantity = uint32(totalQuantity);
+        escrow.totalOrderAmountWei = uint128(totalOrderAmountWei);
+        escrow.submittedAt = uint40(block.timestamp);
+        escrow.platformFeeBpsSnapshot = params.platformEscrowFeeBps;
         escrow.status = EscrowStatus.Open;
 
         emit OrderEscrowOpened(orderId, roundId, winnerMerchantKey, merchantWallet);
@@ -116,44 +111,42 @@ contract MealVoteOrderEscrow {
     function payForOrder(uint256 orderId) external payable {
         OrderEscrow storage escrow = escrows[orderId];
         require(escrow.submittedAt > 0, "escrow missing");
+        require(!pausedEscrows[orderId], "escrow paused");
         require(escrow.status == EscrowStatus.Open, "escrow closed");
         require(msg.value > 0, "zero payment");
 
         memberPaidWei[orderId][msg.sender] += msg.value;
-        escrow.payer = msg.sender;
         emit OrderPaymentSubmitted(orderId, msg.sender, msg.value);
     }
 
     function merchantAccept(uint256 orderId) external {
         OrderEscrow storage escrow = escrows[orderId];
         require(msg.sender == escrow.merchantWallet, "not merchant");
+        require(!pausedEscrows[orderId], "escrow paused");
         require(escrow.status == EscrowStatus.Open, "status invalid");
         escrow.status = EscrowStatus.MerchantAccepted;
-        escrow.merchantAcceptedAt = block.timestamp;
         emit MerchantAccepted(orderId, msg.sender);
     }
 
     function merchantComplete(uint256 orderId) external {
         OrderEscrow storage escrow = escrows[orderId];
         require(msg.sender == escrow.merchantWallet, "not merchant");
+        require(!pausedEscrows[orderId], "escrow paused");
         require(escrow.status == EscrowStatus.MerchantAccepted, "status invalid");
         escrow.status = EscrowStatus.MerchantCompleted;
-        escrow.merchantCompletedAt = block.timestamp;
         emit MerchantCompleted(orderId, msg.sender);
     }
 
     function memberConfirmReceived(uint256 orderId) external {
         OrderEscrow storage escrow = escrows[orderId];
+        require(!pausedEscrows[orderId], "escrow paused");
         require(escrow.status == EscrowStatus.MerchantCompleted, "status invalid");
         require(memberPaidWei[orderId][msg.sender] > 0, "not participant");
 
         escrow.status = EscrowStatus.MemberConfirmed;
-        escrow.memberConfirmedAt = block.timestamp;
 
-        uint256 platformAmountWei = (escrow.totalOrderAmountWei * params.platformEscrowFeeBps) / 10000;
-        uint256 merchantAmountWei = escrow.totalOrderAmountWei - platformAmountWei;
-        escrow.merchantAmountWei = merchantAmountWei;
-        escrow.platformAmountWei = platformAmountWei;
+        uint256 platformAmountWei = (uint256(escrow.totalOrderAmountWei) * escrow.platformFeeBpsSnapshot) / 10000;
+        uint256 merchantAmountWei = uint256(escrow.totalOrderAmountWei) - platformAmountWei;
 
         emit MemberConfirmed(orderId, msg.sender);
         emit MerchantPayoutPrepared(orderId, merchantAmountWei, platformAmountWei);
@@ -163,30 +156,30 @@ contract MealVoteOrderEscrow {
         OrderEscrow storage escrow = escrows[orderId];
         require(escrow.submittedAt > 0, "escrow missing");
         require(escrow.status == EscrowStatus.MemberConfirmed, "status invalid");
-        require(!escrow.payoutReleased, "already released");
 
-        escrow.payoutReleased = true;
         escrow.status = EscrowStatus.PaidOut;
-        escrow.paidOutAt = block.timestamp;
 
-        if (escrow.merchantAmountWei > 0) {
-            payable(escrow.merchantWallet).transfer(escrow.merchantAmountWei);
+        uint256 platformAmountWei = (uint256(escrow.totalOrderAmountWei) * escrow.platformFeeBpsSnapshot) / 10000;
+        uint256 merchantAmountWei = uint256(escrow.totalOrderAmountWei) - platformAmountWei;
+
+        if (merchantAmountWei > 0) {
+            payable(escrow.merchantWallet).transfer(merchantAmountWei);
         }
-        if (escrow.platformAmountWei > 0) {
-            payable(platformWallet).transfer(escrow.platformAmountWei);
+        if (platformAmountWei > 0) {
+            payable(platformWallet).transfer(platformAmountWei);
         }
 
-        emit PayoutReleased(orderId, escrow.merchantWallet, escrow.merchantAmountWei, escrow.platformAmountWei);
+        emit PayoutReleased(orderId, escrow.merchantWallet, merchantAmountWei, platformAmountWei);
     }
 
     function pauseEscrow(uint256 orderId) external onlyOwner {
-        escrows[orderId].paused = true;
+        pausedEscrows[orderId] = true;
         escrows[orderId].status = EscrowStatus.Paused;
         emit EscrowPaused(msg.sender, orderId);
     }
 
     function unpauseEscrow(uint256 orderId, EscrowStatus resumeStatus) external onlyOwner {
-        escrows[orderId].paused = false;
+        pausedEscrows[orderId] = false;
         escrows[orderId].status = resumeStatus;
         emit EscrowUnpaused(msg.sender, orderId);
     }

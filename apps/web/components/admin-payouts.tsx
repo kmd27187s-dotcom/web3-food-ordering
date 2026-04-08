@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { fetchAdminDashboard, fetchContractInfo, markAdminOrderPaid, updatePlatformTreasury, type AdminDashboard, type ContractInfo } from "@/lib/api";
-import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress } from "@/lib/chain";
+import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress, toFriendlyWalletError } from "@/lib/chain";
 import { connectWallet } from "@/lib/wallet-auth";
 
 export function AdminPayouts() {
@@ -70,7 +70,7 @@ export function AdminPayouts() {
       await refresh();
       setMessage("已從 escrow 合約完成正式撥款。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "平台撥款失敗");
+      setMessage(toFriendlyWalletError(error, "平台撥款未成功，請重新操作。"));
     } finally {
       setPending(false);
     }

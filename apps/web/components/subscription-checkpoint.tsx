@@ -4,23 +4,28 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { fetchMe, paySubscription, type Member } from "@/lib/api";
+import { fetchContractInfo, fetchMe, fetchPublicGovernanceParams, syncSubscription, type ContractInfo, type GovernanceParams, type Member } from "@/lib/api";
+import { ensureSepoliaClients, GOVERNANCE_ABI, isUsableContractAddress, toFriendlyWalletError, waitForSubscriptionPaid } from "@/lib/chain";
 
 export function SubscriptionCheckpoint() {
   const router = useRouter();
   const [member, setMember] = useState<Member | null>(null);
+  const [contractInfo, setContractInfo] = useState<ContractInfo | null>(null);
+  const [governanceParams, setGovernanceParams] = useState<GovernanceParams | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    fetchMe()
-      .then((nextMember) => {
+    Promise.all([fetchMe(), fetchContractInfo().catch(() => null), fetchPublicGovernanceParams().catch(() => null)])
+      .then(([nextMember, nextContract, nextParams]) => {
         if (nextMember.subscriptionActive) {
           router.replace("/member");
           return;
         }
         setMember(nextMember);
+        setContractInfo(nextContract);
+        setGovernanceParams(nextParams);
       })
       .catch((error) => {
         setMessage(error instanceof Error ? error.message : "目前無法讀取訂閱狀態");
@@ -32,10 +37,30 @@ export function SubscriptionCheckpoint() {
     setPending(true);
     setMessage("");
     try {
-      await paySubscription();
+      const activeContractInfo = contractInfo;
+      if (!isUsableContractAddress(activeContractInfo?.governanceContract) || !governanceParams) {
+        throw new Error("目前尚未配置可用的治理合約。");
+      }
+      const governanceAddress = activeContractInfo!.governanceContract as `0x${string}`;
+      const { walletClient, account } = await ensureSepoliaClients();
+      const txHash = await walletClient.writeContract({
+        address: governanceAddress,
+        abi: GOVERNANCE_ABI,
+        functionName: "subscribeMonthly",
+        args: [],
+        account,
+        chain: walletClient.chain,
+        value: BigInt(governanceParams.subscriptionFeeWei)
+      });
+      const paid = await waitForSubscriptionPaid(txHash);
+      await syncSubscription({
+        txHash,
+        amountWei: paid.amountWei.toString(),
+        expiresAt: new Date(paid.expiresAt * 1000).toISOString()
+      });
       router.replace("/member");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "訂閱失敗");
+      setMessage(toFriendlyWalletError(error, "訂閱付款未成功，請重新操作。"));
     } finally {
       setPending(false);
     }
@@ -52,13 +77,13 @@ export function SubscriptionCheckpoint() {
           <div className="meal-section-heading">
             <p className="meal-kicker">Subscription checkpoint</p>
             <h1>尚未訂閱成為會員。</h1>
-            <p>99 平台 Token / 30 天。</p>
+            <p>{governanceParams ? `${governanceParams.subscriptionFeeWei} Wei / ${governanceParams.subscriptionDurationDays} 天。` : "鏈上月訂閱。"}</p>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
             <AccessStat label="會員" value={member?.displayName || "—"} />
-            <AccessStat label="訂閱費用" value="99 平台 Token" />
-            <AccessStat label="有效期間" value="30 天" />
+            <AccessStat label="訂閱費用" value={governanceParams ? `${governanceParams.subscriptionFeeWei} Wei` : "鏈上月訂閱"} />
+            <AccessStat label="有效期間" value={governanceParams ? `${governanceParams.subscriptionDurationDays} 天` : "30 天"} />
           </div>
 
           <div className="flex flex-wrap items-center gap-3">

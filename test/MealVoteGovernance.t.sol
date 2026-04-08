@@ -19,6 +19,7 @@ contract MealVoteGovernanceTest is Test {
             createFeeWei: 1 ether,
             proposalFeeWei: 0.5 ether,
             voteFeeWei: 0.2 ether,
+            subscriptionFeeWei: 0.1 ether,
             winnerProposalRefundBps: 9000,
             loserProposalRefundBps: 8000,
             voteRefundBps: 5000,
@@ -32,7 +33,8 @@ contract MealVoteGovernanceTest is Test {
             dailyCreateCouponCount: 1,
             dailyProposalCouponCount: 1,
             dailyVoteCouponCount: 1,
-            governanceClaimTimeoutMins: 43200
+            governanceClaimTimeoutMins: 43200,
+            subscriptionDurationDays: 30
         });
         governance = new MealVoteGovernance(platform, params);
         vm.deal(alice, 20 ether);
@@ -55,7 +57,7 @@ contract MealVoteGovernanceTest is Test {
         );
 
         assertEq(roundId, 1);
-        (,, address creator,,,,,,,,,,,,,,) = governance.rounds(roundId);
+        (, , address creator, , , , , , , , , , , ) = governance.rounds(roundId);
         assertEq(creator, alice);
     }
 
@@ -69,5 +71,13 @@ contract MealVoteGovernanceTest is Test {
         assertEq(proposalCoupons, 1);
         assertEq(voteCoupons, 1);
         assertTrue(claimed);
+    }
+
+    function testSubscribeMonthlyUpdatesExpiry() public {
+        vm.prank(alice);
+        uint256 expiresAt = governance.subscribeMonthly{value: 0.1 ether}();
+
+        assertGt(expiresAt, block.timestamp);
+        assertEq(governance.subscriptionExpiresAt(alice), expiresAt);
     }
 }

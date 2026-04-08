@@ -40,7 +40,7 @@ cp .env.foundry.example .env.foundry
 
 - `SEPOLIA_RPC_URL`
 - `ETHERSCAN_API_KEY`
-- `DEPLOYER_PRIVATE_KEY`
+- `DEPLOYER_PRIVATE_KEY`：需帶 `0x`
 - `PLATFORM_MAIN_WALLET`
 
 如果我已經幫你建立了 `.env.foundry`，你也可以直接編輯那個檔案，不需要再複製一次。

@@ -44,6 +44,8 @@ type GovernanceParams struct {
 	CreateFeeWei              int64 `json:"createFeeWei"`
 	ProposalFeeWei            int64 `json:"proposalFeeWei"`
 	VoteFeeWei                int64 `json:"voteFeeWei"`
+	SubscriptionFeeWei        int64 `json:"subscriptionFeeWei"`
+	SubscriptionDurationDays  int64 `json:"subscriptionDurationDays"`
 	WinnerProposalRefundBps   int64 `json:"winnerProposalRefundBps"`
 	LoserProposalRefundBps    int64 `json:"loserProposalRefundBps"`
 	VoteRefundBps             int64 `json:"voteRefundBps"`

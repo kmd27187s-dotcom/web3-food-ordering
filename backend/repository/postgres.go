@@ -502,6 +502,8 @@ func defaultGovernanceParams() *models.GovernanceParams {
 		CreateFeeWei:                defaultCreateFeeWei,
 		ProposalFeeWei:              defaultProposalFeeWei,
 		VoteFeeWei:                  defaultVoteFeeWei,
+		SubscriptionFeeWei:          defaultSubscriptionFeeWei,
+		SubscriptionDurationDays:    defaultSubscriptionDurationDays,
 		WinnerProposalRefundBps:     defaultWinnerProposalRefundBps,
 		LoserProposalRefundBps:      defaultLoserProposalRefundBps,
 		VoteRefundBps:               defaultVoteRefundBps,

@@ -16,7 +16,8 @@ const fieldGroups: Array<{
     fields: [
       { key: "createFeeWei", label: "建立訂單費 (必填)", help: "建立一筆訂單 round 的固定費。" },
       { key: "proposalFeeWei", label: "提案費 (必填)", help: "每提一間店要支付的固定費率。" },
-      { key: "voteFeeWei", label: "投票費 (必填)", help: "每 1 票對應的固定費率。" }
+      { key: "voteFeeWei", label: "投票費 (必填)", help: "每 1 票對應的固定費率。" },
+      { key: "subscriptionFeeWei", label: "訂閱月費 (必填)", help: "每次月訂閱要支付的鏈上費用。" }
     ]
   },
   {
@@ -54,6 +55,13 @@ const fieldGroups: Array<{
       { key: "memberConfirmTimeoutMins", label: "會員確認逾時分鐘數 (必填)", help: "超過後可自動視為已完成。" },
       { key: "governanceClaimTimeoutMins", label: "治理款領取逾時分鐘數 (必填)", help: "超過後可進 timeout recovery。" },
       { key: "escrowClaimTimeoutMins", label: "Escrow 領款逾時分鐘數 (必填)", help: "超過後可進 timeout recovery。" }
+    ]
+  },
+  {
+    title: "訂閱設定",
+    description: "月訂閱的鏈上費用與有效天數。",
+    fields: [
+      { key: "subscriptionDurationDays", label: "訂閱有效天數 (必填)", help: "每次成功訂閱後往後延長的天數。" }
     ]
   }
 ];

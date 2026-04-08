@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { confirmMemberOrder, fetchContractInfo, fetchGroupDetail, fetchMyOrderHistory, type ContractInfo, type Order } from "@/lib/api";
-import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress } from "@/lib/chain";
+import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress, toFriendlyWalletError } from "@/lib/chain";
 import { OrderDetailPanel } from "@/components/member-order-shared";
 
 type MemberOrderDetailProps =
@@ -65,7 +65,7 @@ export function MemberOrderDetailView(props: MemberOrderDetailProps) {
       await refresh();
       setMessage("已確認接收訂單。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "確認接收失敗");
+      setMessage(toFriendlyWalletError(error, "確認收貨未成功，請重新操作。"));
     } finally {
       setPending(false);
     }

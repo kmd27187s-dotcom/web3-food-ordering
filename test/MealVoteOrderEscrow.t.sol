@@ -27,17 +27,15 @@ contract MealVoteOrderEscrowTest is Test {
     }
 
     function testOpenEscrowAndPay() public {
-        address[] memory participants = new address[](1);
-        participants[0] = alice;
-
         uint256 orderId = escrow.openEscrow(
             1,
             keccak256("group:demo"),
             keccak256("merchant:winner"),
             keccak256("menu:snapshot"),
             keccak256("order:detail"),
+            keccak256("participants:alice"),
             merchant,
-            participants,
+            1,
             2,
             1 ether
         );
@@ -49,17 +47,15 @@ contract MealVoteOrderEscrowTest is Test {
     }
 
     function testReleasePayoutAfterMemberConfirm() public {
-        address[] memory participants = new address[](1);
-        participants[0] = alice;
-
         uint256 orderId = escrow.openEscrow(
             1,
             keccak256("group:demo"),
             keccak256("merchant:winner"),
             keccak256("menu:snapshot"),
             keccak256("order:detail"),
+            keccak256("participants:alice"),
             merchant,
-            participants,
+            1,
             2,
             1 ether
         );

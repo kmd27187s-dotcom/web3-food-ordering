@@ -6,6 +6,8 @@ const (
 	defaultCreateFeeWei                = int64(1000000000000000)  // 0.001 ETH
 	defaultProposalFeeWei              = int64(500000000000000)   // 0.0005 ETH
 	defaultVoteFeeWei                  = int64(300000000000000)   // 0.0003 ETH
+	defaultSubscriptionFeeWei          = int64(990000000000000)   // 0.00099 ETH
+	defaultSubscriptionDurationDays    = int64(30)
 	defaultWinnerProposalRefundBps     = int64(9000)
 	defaultLoserProposalRefundBps      = int64(8000)
 	defaultVoteRefundBps               = int64(5000)

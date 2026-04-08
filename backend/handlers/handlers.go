@@ -174,6 +174,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("POST /join/{code}", s.withSubscribed(s.handleJoinGroup))
 	mux.HandleFunc("POST /tokens/claim", s.withAuth(s.handleClaimFaucet))
 	mux.HandleFunc("POST /subscription/pay", s.withAuth(s.handleSubscriptionPay))
+	mux.HandleFunc("POST /subscription/sync", s.withAuth(s.handleSubscriptionSync))
 	mux.HandleFunc("POST /api/members/subscribe", s.withAuth(s.handleSubscriptionPay))
 	mux.HandleFunc("POST /demo/seed", s.handleDemoSeed)
 	mux.HandleFunc("POST /admin/proposals/{id}/advance", s.withAdmin(s.handleAdvanceProposalStage))
@@ -1630,6 +1631,37 @@ func (s *Server) handleSubscriptionPay(w http.ResponseWriter, r *http.Request, m
 		"subscriptionActive":  member.SubscriptionActive,
 		"subscriptionExpires": member.SubscriptionExpiresAt,
 	})
+}
+
+func (s *Server) handleSubscriptionSync(w http.ResponseWriter, r *http.Request, memberID int64) {
+	var body struct {
+		TxHash     string `json:"txHash"`
+		AmountWei  string `json:"amountWei"`
+		ExpiresAt  string `json:"expiresAt"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	expiresAt, err := time.Parse(time.RFC3339, body.ExpiresAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid expiresAt")
+		return
+	}
+	if err := s.members.SetSubscriptionExpiry(memberID, expiresAt); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if err := s.usageRepo.LogUsage(memberID, 0, "subscribe", "native", "debit", body.AmountWei, "鏈上月訂閱", body.TxHash); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	member, err := s.members.GetByID(memberID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, member)
 }
 
 // ── Demo seed handler ─────────────────────────────────────────────────────────

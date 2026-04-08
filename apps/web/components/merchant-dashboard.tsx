@@ -15,7 +15,7 @@ import {
   type MerchantDashboard as MerchantDashboardData,
   type Member
 } from "@/lib/api";
-import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress } from "@/lib/chain";
+import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress, toFriendlyWalletError } from "@/lib/chain";
 
 function formatWei(value: string | number) {
   const amount = BigInt(typeof value === "number" ? value : value || "0");
@@ -110,7 +110,7 @@ export function MerchantDashboard() {
       await refresh();
       setMessage("訂單已確認接收。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "接單失敗");
+      setMessage(toFriendlyWalletError(error, "接單未成功，請重新操作。"));
     } finally {
       setPending(false);
     }
@@ -136,7 +136,7 @@ export function MerchantDashboard() {
       await refresh();
       setMessage("已標記為製作完成，等待會員確認。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "更新訂單失敗");
+      setMessage(toFriendlyWalletError(error, "更新訂單未成功，請重新操作。"));
     } finally {
       setPending(false);
     }

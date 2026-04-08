@@ -27,6 +27,7 @@ contract DeployMealVote {
             createFeeWei: vm.envOr("CREATE_FEE_WEI", uint256(1000000000000000)),
             proposalFeeWei: vm.envOr("PROPOSAL_FEE_WEI", uint256(500000000000000)),
             voteFeeWei: vm.envOr("VOTE_FEE_WEI", uint256(200000000000000)),
+            subscriptionFeeWei: vm.envOr("SUBSCRIPTION_FEE_WEI", uint256(990000000000000)),
             winnerProposalRefundBps: uint16(vm.envOr("WINNER_PROPOSAL_REFUND_BPS", uint256(9000))),
             loserProposalRefundBps: uint16(vm.envOr("LOSER_PROPOSAL_REFUND_BPS", uint256(8000))),
             voteRefundBps: uint16(vm.envOr("VOTE_REFUND_BPS", uint256(5000))),
@@ -40,7 +41,8 @@ contract DeployMealVote {
             dailyCreateCouponCount: uint16(vm.envOr("DAILY_CREATE_COUPON_COUNT", uint256(1))),
             dailyProposalCouponCount: uint16(vm.envOr("DAILY_PROPOSAL_COUPON_COUNT", uint256(1))),
             dailyVoteCouponCount: uint16(vm.envOr("DAILY_VOTE_COUPON_COUNT", uint256(1))),
-            governanceClaimTimeoutMins: uint32(vm.envOr("GOVERNANCE_CLAIM_TIMEOUT_MINS", uint256(43200)))
+            governanceClaimTimeoutMins: uint32(vm.envOr("GOVERNANCE_CLAIM_TIMEOUT_MINS", uint256(43200))),
+            subscriptionDurationDays: uint16(vm.envOr("SUBSCRIPTION_DURATION_DAYS", uint256(30)))
         });
 
         MealVoteOrderEscrow.EscrowParams memory escrowParams = MealVoteOrderEscrow.EscrowParams({
@@ -93,7 +95,8 @@ contract DeployMealVote {
             '  "governanceParams": {\n',
             '    "createFeeWei": "', uintToString(governanceParams.createFeeWei), '",\n',
             '    "proposalFeeWei": "', uintToString(governanceParams.proposalFeeWei), '",\n',
-            '    "voteFeeWei": "', uintToString(governanceParams.voteFeeWei), '"\n',
+            '    "voteFeeWei": "', uintToString(governanceParams.voteFeeWei), '",\n',
+            '    "subscriptionFeeWei": "', uintToString(governanceParams.subscriptionFeeWei), '"\n',
             "  },\n",
             '  "escrowParams": {\n',
             '    "platformEscrowFeeBps": "', uintToString(escrowParams.platformEscrowFeeBps), '",\n',

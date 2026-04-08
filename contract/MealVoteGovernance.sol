@@ -16,6 +16,7 @@ contract MealVoteGovernance {
         uint256 createFeeWei;
         uint256 proposalFeeWei;
         uint256 voteFeeWei;
+        uint256 subscriptionFeeWei;
         uint16 winnerProposalRefundBps;
         uint16 loserProposalRefundBps;
         uint16 voteRefundBps;
@@ -30,6 +31,7 @@ contract MealVoteGovernance {
         uint16 dailyProposalCouponCount;
         uint16 dailyVoteCouponCount;
         uint32 governanceClaimTimeoutMins;
+        uint16 subscriptionDurationDays;
     }
 
     struct Round {
@@ -37,49 +39,39 @@ contract MealVoteGovernance {
         bytes32 titleHash;
         address creator;
         RoundStatus status;
-        uint256 createdAt;
-        uint256 proposalDeadline;
-        uint256 voteDeadline;
-        uint256 orderingDeadline;
-        uint256 createFeeSnapshot;
-        uint256 proposalFeeSnapshot;
-        uint256 voteFeeSnapshot;
-        uint256 createFeeRefundableWei;
-        uint256 createFeePlatformWei;
-        uint256 totalVotes;
-        uint256 winnerCandidateId;
+        uint40 createdAt;
+        uint40 proposalDeadline;
+        uint40 voteDeadline;
+        uint40 orderingDeadline;
+        uint128 createFeeSnapshot;
+        uint128 proposalFeeSnapshot;
+        uint128 voteFeeSnapshot;
+        uint32 totalVotes;
+        uint32 winnerCandidateId;
         bool settled;
-        bool paused;
     }
 
     struct Candidate {
         bytes32 merchantKey;
         address proposer;
-        uint256 firstProposedAt;
-        uint256 proposalFeePaidWei;
-        uint256 voteFeeCollectedWei;
-        uint256 voteRefundWei;
-        uint256 proposerRefundWei;
-        uint256 proposerRewardWei;
-        uint256 voteCount;
-        bool isWinner;
-        bool usedProposalCoupon;
+        uint40 firstProposedAt;
+        uint128 proposalFeePaidWei;
+        uint128 voteFeeCollectedWei;
+        uint32 voteCount;
     }
 
     struct VoteRecord {
-        uint256 candidateId;
-        uint256 voteCount;
-        uint256 feeAmountWei;
-        uint256 refundWei;
-        bool usedVoteCoupon;
+        uint32 candidateId;
+        uint32 voteCount;
+        uint128 feeAmountWei;
         bool exists;
     }
 
     struct CouponState {
-        uint256 dayKey;
-        uint256 createCoupons;
-        uint256 proposalCoupons;
-        uint256 voteCoupons;
+        uint32 dayKey;
+        uint16 createCoupons;
+        uint16 proposalCoupons;
+        uint16 voteCoupons;
         bool claimed;
     }
 
@@ -90,15 +82,16 @@ contract MealVoteGovernance {
 
     mapping(uint256 => Round) public rounds;
     mapping(uint256 => mapping(uint256 => Candidate)) public candidates;
-    mapping(uint256 => uint256) public candidateCountByRound;
-    mapping(uint256 => mapping(address => uint256)) public memberProposalCount;
+    mapping(uint256 => uint32) public candidateCountByRound;
+    mapping(uint256 => mapping(address => uint8)) public memberProposalCount;
     mapping(uint256 => mapping(bytes32 => bool)) public merchantAlreadyProposed;
     mapping(uint256 => mapping(address => VoteRecord)) public votes;
     mapping(address => CouponState) public coupons;
     mapping(address => uint256) public pointsBalance;
-    mapping(address => uint256) public claimableGovernanceRefundWei;
-    mapping(address => uint256) public claimableGovernanceRewardWei;
-    mapping(address => uint256) public claimablePlatformShareWei;
+    mapping(address => uint40) public subscriptionExpiresAt;
+    mapping(uint256 => mapping(address => bool)) public roundClaimed;
+    mapping(uint256 => bool) public platformRoundClaimed;
+    mapping(uint256 => bool) public pausedRounds;
 
     event GovernanceParamsUpdated(address indexed updatedBy);
     event DailyCouponsClaimed(address indexed member, uint256 indexed dayKey, uint256 createCoupons, uint256 proposalCoupons, uint256 voteCoupons);
@@ -107,10 +100,11 @@ contract MealVoteGovernance {
     event VoteCast(uint256 indexed roundId, uint256 indexed candidateId, address indexed voter, uint256 voteCount, uint256 feeAmountWei, bool usedCoupon);
     event RoundCancelled(uint256 indexed roundId, address indexed creator, uint256 refundWei, uint256 platformWei);
     event RoundSettled(uint256 indexed roundId, uint256 indexed winnerCandidateId, uint256 totalVotes, bool failed);
-    event GovernanceRefundClaimed(address indexed member, uint256 amountWei);
-    event GovernanceRewardClaimed(address indexed member, uint256 amountWei);
-    event PlatformShareClaimed(address indexed platformWallet, uint256 amountWei);
+    event RoundClaimed(uint256 indexed roundId, address indexed claimant, uint256 amountWei);
+    event PlatformShareClaimed(address indexed platformWallet, uint256 indexed roundId, uint256 amountWei);
     event PointsGranted(address indexed member, uint256 indexed roundId, uint256 amount, bytes32 reason);
+    event SubscriptionPaid(address indexed member, uint256 amountWei, uint256 expiresAt);
+    event SubscriptionCancelled(address indexed member, uint256 cancelledAt);
     event ContractPaused(address indexed operator, uint256 indexed roundId);
     event ContractUnpaused(address indexed operator, uint256 indexed roundId);
     event EmergencyRescue(address indexed operator, uint256 indexed roundId, address indexed recipient, uint256 amountWei, bytes32 reason);
@@ -135,12 +129,27 @@ contract MealVoteGovernance {
     function claimDailyCoupons(uint256 dayKey) external {
         CouponState storage state = coupons[msg.sender];
         require(state.dayKey != dayKey || !state.claimed, "already claimed");
-        state.dayKey = dayKey;
+        state.dayKey = uint32(dayKey);
         state.createCoupons = params.dailyCreateCouponCount;
         state.proposalCoupons = params.dailyProposalCouponCount;
         state.voteCoupons = params.dailyVoteCouponCount;
         state.claimed = true;
         emit DailyCouponsClaimed(msg.sender, dayKey, state.createCoupons, state.proposalCoupons, state.voteCoupons);
+    }
+
+    function subscribeMonthly() external payable returns (uint256 expiresAt) {
+        require(msg.value == params.subscriptionFeeWei, "invalid subscription fee");
+        uint40 currentExpiry = subscriptionExpiresAt[msg.sender];
+        uint40 base = currentExpiry > block.timestamp ? currentExpiry : uint40(block.timestamp);
+        uint40 nextExpiry = base + uint40(params.subscriptionDurationDays * 1 days);
+        subscriptionExpiresAt[msg.sender] = nextExpiry;
+        emit SubscriptionPaid(msg.sender, msg.value, nextExpiry);
+        return nextExpiry;
+    }
+
+    function cancelSubscription() external {
+        subscriptionExpiresAt[msg.sender] = uint40(block.timestamp);
+        emit SubscriptionCancelled(msg.sender, block.timestamp);
     }
 
     function createRound(
@@ -167,13 +176,13 @@ contract MealVoteGovernance {
         round.titleHash = titleHash;
         round.creator = msg.sender;
         round.status = RoundStatus.ProposalOpen;
-        round.createdAt = block.timestamp;
-        round.proposalDeadline = block.timestamp + (params.proposalDurationMinutes * 1 minutes);
-        round.voteDeadline = round.proposalDeadline + (params.voteDurationMinutes * 1 minutes);
-        round.orderingDeadline = round.voteDeadline + (params.orderingDurationMinutes * 1 minutes);
-        round.createFeeSnapshot = params.createFeeWei;
-        round.proposalFeeSnapshot = params.proposalFeeWei;
-        round.voteFeeSnapshot = params.voteFeeWei;
+        round.createdAt = uint40(block.timestamp);
+        round.proposalDeadline = uint40(block.timestamp + (params.proposalDurationMinutes * 1 minutes));
+        round.voteDeadline = uint40(uint256(round.proposalDeadline) + (params.voteDurationMinutes * 1 minutes));
+        round.orderingDeadline = uint40(uint256(round.voteDeadline) + (params.orderingDurationMinutes * 1 minutes));
+        round.createFeeSnapshot = uint128(params.createFeeWei);
+        round.proposalFeeSnapshot = uint128(params.proposalFeeWei);
+        round.voteFeeSnapshot = uint128(params.voteFeeWei);
 
         if (useCreateCoupon) {
             _consumeCoupon(msg.sender, 0);
@@ -192,6 +201,8 @@ contract MealVoteGovernance {
     function castVote(uint256 roundId, uint256 candidateId, uint256 voteCount, bool useCoupon) external payable {
         require(voteCount > 0, "vote count");
         Round storage round = rounds[roundId];
+        require(round.creator != address(0), "round missing");
+        require(!pausedRounds[roundId], "round paused");
         require(round.status == RoundStatus.ProposalOpen || round.status == RoundStatus.VotingOpen, "round closed");
         require(block.timestamp > round.proposalDeadline, "proposal active");
         require(block.timestamp <= round.voteDeadline, "vote closed");
@@ -210,18 +221,16 @@ contract MealVoteGovernance {
         require(msg.value == requiredValue, "invalid vote fee");
 
         votes[roundId][msg.sender] = VoteRecord({
-            candidateId: candidateId,
-            voteCount: voteCount,
-            feeAmountWei: requiredValue,
-            refundWei: 0,
-            usedVoteCoupon: useCoupon,
+            candidateId: uint32(candidateId),
+            voteCount: uint32(voteCount),
+            feeAmountWei: uint128(requiredValue),
             exists: true
         });
 
         Candidate storage candidate = candidates[roundId][candidateId];
-        candidate.voteFeeCollectedWei += requiredValue;
-        candidate.voteCount += voteCount;
-        rounds[roundId].totalVotes += voteCount;
+        candidate.voteFeeCollectedWei += uint128(requiredValue);
+        candidate.voteCount += uint32(voteCount);
+        round.totalVotes += uint32(voteCount);
 
         emit VoteCast(roundId, candidateId, msg.sender, voteCount, requiredValue, useCoupon);
     }
@@ -233,102 +242,101 @@ contract MealVoteGovernance {
         require(round.status == RoundStatus.ProposalOpen, "round not cancellable");
         require(_hasOnlyCreatorProposals(roundId, msg.sender), "external proposals exist");
 
-        uint256 refundWei = (round.createFeeSnapshot * 5000) / 10000;
-        round.createFeeRefundableWei = refundWei;
-        round.createFeePlatformWei = round.createFeeSnapshot - refundWei;
         round.status = RoundStatus.Cancelled;
-
-        claimableGovernanceRefundWei[msg.sender] += refundWei;
-        claimablePlatformShareWei[platformWallet] += round.createFeePlatformWei;
-        emit RoundCancelled(roundId, msg.sender, refundWei, round.createFeePlatformWei);
+        emit RoundCancelled(roundId, msg.sender, _creatorCancelledRefund(round), _platformShareForCancelledRound(roundId, round));
     }
 
     function settleRound(uint256 roundId) external {
         Round storage round = rounds[roundId];
+        require(round.creator != address(0), "round missing");
         require(block.timestamp > round.voteDeadline, "vote still active");
         require(!round.settled, "already settled");
 
         round.settled = true;
         if (round.totalVotes == 0) {
             round.status = RoundStatus.VotingClosedFailed;
-            round.createFeePlatformWei = round.createFeeSnapshot;
-            claimablePlatformShareWei[platformWallet] += round.createFeeSnapshot;
             emit RoundSettled(roundId, 0, 0, true);
             return;
         }
 
         uint256 winnerCandidateId = _findWinner(roundId);
-        round.winnerCandidateId = winnerCandidateId;
+        round.winnerCandidateId = uint32(winnerCandidateId);
         round.status = RoundStatus.VotingClosedSuccess;
-        round.createFeeRefundableWei = round.createFeeSnapshot;
-        claimableGovernanceRefundWei[round.creator] += round.createFeeSnapshot;
-
-        for (uint256 candidateId = 1; candidateId <= candidateCountByRound[roundId]; candidateId++) {
-            Candidate storage candidate = candidates[roundId][candidateId];
-            uint256 voteRefundWei = (candidate.voteFeeCollectedWei * params.voteRefundBps) / 10000;
-            uint256 proposerRefundWei = candidateId == winnerCandidateId
-                ? (candidate.proposalFeePaidWei * params.winnerProposalRefundBps) / 10000
-                : (candidate.proposalFeePaidWei * params.loserProposalRefundBps) / 10000;
-            uint256 postVoteRefundRemainder = candidate.voteFeeCollectedWei - voteRefundWei;
-            uint256 proposerRewardWei = candidateId == winnerCandidateId
-                ? (postVoteRefundRemainder * params.winnerBonusBps) / 10000
-                : (postVoteRefundRemainder * params.loserBonusBps) / 10000;
-
-            candidate.voteRefundWei = voteRefundWei;
-            candidate.proposerRefundWei = proposerRefundWei;
-            candidate.proposerRewardWei = proposerRewardWei;
-            candidate.isWinner = candidateId == winnerCandidateId;
-
-            if (!candidate.usedProposalCoupon && proposerRefundWei > 0) {
-                claimableGovernanceRefundWei[candidate.proposer] += proposerRefundWei;
-            }
-            if (proposerRewardWei > 0) {
-                claimableGovernanceRewardWei[candidate.proposer] += proposerRewardWei;
-            }
-
-            uint256 platformShare = candidate.proposalFeePaidWei - proposerRefundWei + postVoteRefundRemainder - proposerRewardWei;
-            claimablePlatformShareWei[platformWallet] += platformShare;
-
-            if (candidateId == winnerCandidateId) {
-                pointsBalance[candidate.proposer] += params.winnerProposalPoints;
-                emit PointsGranted(candidate.proposer, roundId, params.winnerProposalPoints, keccak256("winner_proposal"));
-            }
-        }
-
         emit RoundSettled(roundId, winnerCandidateId, round.totalVotes, false);
     }
 
-    function claimGovernanceRefund() external {
-        uint256 amount = claimableGovernanceRefundWei[msg.sender];
-        require(amount > 0, "no refund");
-        claimableGovernanceRefundWei[msg.sender] = 0;
-        payable(msg.sender).transfer(amount);
-        emit GovernanceRefundClaimed(msg.sender, amount);
+    function claimRound(uint256 roundId) external {
+        Round storage round = rounds[roundId];
+        require(_isClaimableStatus(round.status), "round not claimable");
+        require(!roundClaimed[roundId][msg.sender], "already claimed");
+
+        uint256 amountWei;
+        uint256 totalPointsToGrant;
+
+        if (round.status == RoundStatus.Cancelled) {
+            if (msg.sender == round.creator) {
+                amountWei += _creatorCancelledRefund(round);
+            }
+        } else if (round.status == RoundStatus.VotingClosedSuccess) {
+            if (msg.sender == round.creator) {
+                amountWei += round.createFeeSnapshot;
+            }
+
+            VoteRecord memory vote = votes[roundId][msg.sender];
+            if (vote.exists) {
+                amountWei += _voteRefund(vote);
+                if (vote.candidateId == round.winnerCandidateId) {
+                    uint256 votePoints = params.winnerVotePointsPerVote * vote.voteCount;
+                    totalPointsToGrant += votePoints;
+                    emit PointsGranted(msg.sender, roundId, votePoints, keccak256("winner_vote"));
+                }
+            }
+
+            uint32 claimCandidateCount = candidateCountByRound[roundId];
+            for (uint32 candidateId = 1; candidateId <= claimCandidateCount; candidateId++) {
+                Candidate memory candidate = candidates[roundId][candidateId];
+                if (candidate.proposer != msg.sender) {
+                    continue;
+                }
+                amountWei += _proposalRefund(candidate, candidateId == round.winnerCandidateId);
+                amountWei += _proposalReward(candidate, candidateId == round.winnerCandidateId);
+                if (candidateId == round.winnerCandidateId) {
+                    totalPointsToGrant += params.winnerProposalPoints;
+                    emit PointsGranted(msg.sender, roundId, params.winnerProposalPoints, keccak256("winner_proposal"));
+                }
+            }
+        }
+
+        require(amountWei > 0 || totalPointsToGrant > 0, "nothing to claim");
+        roundClaimed[roundId][msg.sender] = true;
+        if (totalPointsToGrant > 0) {
+            pointsBalance[msg.sender] += totalPointsToGrant;
+        }
+        if (amountWei > 0) {
+            payable(msg.sender).transfer(amountWei);
+        }
+        emit RoundClaimed(roundId, msg.sender, amountWei);
     }
 
-    function claimGovernanceReward() external {
-        uint256 amount = claimableGovernanceRewardWei[msg.sender];
-        require(amount > 0, "no reward");
-        claimableGovernanceRewardWei[msg.sender] = 0;
-        payable(msg.sender).transfer(amount);
-        emit GovernanceRewardClaimed(msg.sender, amount);
-    }
+    function claimPlatformShare(uint256 roundId) external onlyOwner {
+        Round storage round = rounds[roundId];
+        require(_isClaimableStatus(round.status), "round not claimable");
+        require(!platformRoundClaimed[roundId], "platform already claimed");
 
-    function claimPlatformShare() external onlyOwner {
-        uint256 amount = claimablePlatformShareWei[platformWallet];
-        require(amount > 0, "no platform share");
-        claimablePlatformShareWei[platformWallet] = 0;
-        payable(platformWallet).transfer(amount);
-        emit PlatformShareClaimed(platformWallet, amount);
+        uint256 amountWei = _platformShareForRound(roundId);
+        require(amountWei > 0, "no platform share");
+        platformRoundClaimed[roundId] = true;
+        payable(platformWallet).transfer(amountWei);
+        emit PlatformShareClaimed(platformWallet, roundId, amountWei);
     }
 
     function pauseRound(uint256 roundId) external onlyOwner {
-        rounds[roundId].paused = true;
+        pausedRounds[roundId] = true;
         emit ContractPaused(msg.sender, roundId);
     }
 
     function unpauseRound(uint256 roundId) external onlyOwner {
-        rounds[roundId].paused = false;
+        pausedRounds[roundId] = false;
         emit ContractUnpaused(msg.sender, roundId);
     }
 
@@ -347,6 +355,7 @@ contract MealVoteGovernance {
     function _propose(uint256 roundId, bytes32 merchantKey, address proposer, bool useCoupon, bool expectPayment) internal {
         Round storage round = rounds[roundId];
         require(round.creator != address(0), "round missing");
+        require(!pausedRounds[roundId], "round paused");
         require(block.timestamp <= round.proposalDeadline, "proposal closed");
         require(!merchantAlreadyProposed[roundId][merchantKey], "merchant already proposed");
         require(memberProposalCount[roundId][proposer] < 2, "proposal limit");
@@ -359,19 +368,15 @@ contract MealVoteGovernance {
             _consumeCoupon(proposer, 1);
         }
 
-        uint256 nextCandidateId = ++candidateCountByRound[roundId];
+        uint32 nextCandidateId = candidateCountByRound[roundId] + 1;
+        candidateCountByRound[roundId] = nextCandidateId;
         candidates[roundId][nextCandidateId] = Candidate({
             merchantKey: merchantKey,
             proposer: proposer,
-            firstProposedAt: block.timestamp,
-            proposalFeePaidWei: requiredValue,
+            firstProposedAt: uint40(block.timestamp),
+            proposalFeePaidWei: uint128(requiredValue),
             voteFeeCollectedWei: 0,
-            voteRefundWei: 0,
-            proposerRefundWei: 0,
-            proposerRewardWei: 0,
-            voteCount: 0,
-            isWinner: false,
-            usedProposalCoupon: useCoupon
+            voteCount: 0
         });
         merchantAlreadyProposed[roundId][merchantKey] = true;
         memberProposalCount[roundId][proposer] += 1;
@@ -382,7 +387,8 @@ contract MealVoteGovernance {
     function _findWinner(uint256 roundId) internal view returns (uint256 winnerCandidateId) {
         uint256 winnerVotes = 0;
         uint256 earliestProposalTime = type(uint256).max;
-        for (uint256 candidateId = 1; candidateId <= candidateCountByRound[roundId]; candidateId++) {
+        uint32 candidateCount = candidateCountByRound[roundId];
+        for (uint32 candidateId = 1; candidateId <= candidateCount; candidateId++) {
             Candidate storage candidate = candidates[roundId][candidateId];
             if (
                 candidate.voteCount > winnerVotes ||
@@ -396,7 +402,8 @@ contract MealVoteGovernance {
     }
 
     function _hasOnlyCreatorProposals(uint256 roundId, address creator) internal view returns (bool) {
-        for (uint256 candidateId = 1; candidateId <= candidateCountByRound[roundId]; candidateId++) {
+        uint32 candidateCount = candidateCountByRound[roundId];
+        for (uint32 candidateId = 1; candidateId <= candidateCount; candidateId++) {
             if (candidates[roundId][candidateId].proposer != creator) {
                 return false;
             }
@@ -418,7 +425,86 @@ contract MealVoteGovernance {
         }
     }
 
+    function _proposalRefund(Candidate memory candidate, bool isWinner) internal view returns (uint256) {
+        if (candidate.proposalFeePaidWei == 0) {
+            return 0;
+        }
+        uint256 refundBps = isWinner ? params.winnerProposalRefundBps : params.loserProposalRefundBps;
+        return (candidate.proposalFeePaidWei * refundBps) / 10000;
+    }
+
+    function _proposalReward(Candidate memory candidate, bool isWinner) internal view returns (uint256) {
+        uint256 postVoteRefundRemainder = _postVoteRefundRemainder(candidate.voteFeeCollectedWei);
+        uint256 rewardBps = isWinner ? params.winnerBonusBps : params.loserBonusBps;
+        return (postVoteRefundRemainder * rewardBps) / 10000;
+    }
+
+    function _voteRefund(VoteRecord memory vote) internal view returns (uint256) {
+        if (!vote.exists || vote.feeAmountWei == 0) {
+            return 0;
+        }
+        return (uint256(vote.feeAmountWei) * params.voteRefundBps) / 10000;
+    }
+
+    function _postVoteRefundRemainder(uint256 voteFeeCollectedWei) internal view returns (uint256) {
+        uint256 voteRefundWei = (voteFeeCollectedWei * params.voteRefundBps) / 10000;
+        return voteFeeCollectedWei - voteRefundWei;
+    }
+
+    function _creatorCancelledRefund(Round storage round) internal view returns (uint256) {
+        return (uint256(round.createFeeSnapshot) * 5000) / 10000;
+    }
+
+    function _platformShareForRound(uint256 roundId) internal view returns (uint256) {
+        Round storage round = rounds[roundId];
+        if (round.status == RoundStatus.Cancelled) {
+            return _platformShareForCancelledRound(roundId, round);
+        }
+        if (round.status == RoundStatus.VotingClosedFailed) {
+            uint256 amountWei = uint256(round.createFeeSnapshot);
+            uint32 failedCandidateCount = candidateCountByRound[roundId];
+            for (uint32 candidateId = 1; candidateId <= failedCandidateCount; candidateId++) {
+                Candidate storage candidate = candidates[roundId][candidateId];
+                amountWei += candidate.proposalFeePaidWei;
+                amountWei += candidate.voteFeeCollectedWei;
+            }
+            return amountWei;
+        }
+        if (round.status != RoundStatus.VotingClosedSuccess) {
+            return 0;
+        }
+
+        uint256 amount;
+        uint32 candidateCount = candidateCountByRound[roundId];
+        for (uint32 candidateId = 1; candidateId <= candidateCount; candidateId++) {
+            Candidate storage candidate = candidates[roundId][candidateId];
+            uint256 proposalRefundWei = _proposalRefund(candidate, candidateId == round.winnerCandidateId);
+            uint256 proposalRewardWei = _proposalReward(candidate, candidateId == round.winnerCandidateId);
+            uint256 postVoteRefundRemainder = _postVoteRefundRemainder(candidate.voteFeeCollectedWei);
+            amount += candidate.proposalFeePaidWei - proposalRefundWei;
+            amount += postVoteRefundRemainder - proposalRewardWei;
+        }
+        return amount;
+    }
+
+    function _platformShareForCancelledRound(uint256 roundId, Round storage round) internal view returns (uint256) {
+        uint256 amountWei = uint256(round.createFeeSnapshot) - _creatorCancelledRefund(round);
+        uint32 candidateCount = candidateCountByRound[roundId];
+        for (uint32 candidateId = 1; candidateId <= candidateCount; candidateId++) {
+            amountWei += candidates[roundId][candidateId].proposalFeePaidWei;
+        }
+        return amountWei;
+    }
+
+    function _isClaimableStatus(RoundStatus status) internal pure returns (bool) {
+        return status == RoundStatus.Cancelled || status == RoundStatus.VotingClosedSuccess || status == RoundStatus.VotingClosedFailed;
+    }
+
     function _setGovernanceParams(GovernanceParams memory nextParams) internal {
+        require(nextParams.subscriptionDurationDays > 0, "subscription days");
+        require(nextParams.proposalDurationMinutes > 0, "proposal mins");
+        require(nextParams.voteDurationMinutes > 0, "vote mins");
+        require(nextParams.orderingDurationMinutes > 0, "ordering mins");
         require(nextParams.winnerProposalRefundBps <= 10000, "winner refund bps");
         require(nextParams.loserProposalRefundBps <= 10000, "loser refund bps");
         require(nextParams.voteRefundBps <= 10000, "vote refund bps");

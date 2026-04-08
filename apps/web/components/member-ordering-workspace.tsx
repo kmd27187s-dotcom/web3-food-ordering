@@ -38,8 +38,10 @@ import {
   ensureSepoliaWallet,
   getWalletBalanceWei,
   GOVERNANCE_ABI,
+  hashParticipantAddresses,
   isUsableContractAddress,
   ORDER_ABI,
+  toFriendlyWalletError,
   toStableKey,
   toTextHash,
   waitForEscrowOpened,
@@ -278,7 +280,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       }
       router.push("/member/ongoing-orders");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "建立訂單失敗");
+      setMessage(toFriendlyWalletError(error, "建立訂單付款未成功，請重新操作。"));
     } finally {
       setActionPending(false);
     }
@@ -320,7 +322,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       await refresh();
       setMessage("已新增提案店家。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "新增提案店家失敗");
+      setMessage(toFriendlyWalletError(error, "提案付款未成功，請重新操作。"));
     } finally {
       setActionPending(false);
     }
@@ -395,7 +397,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       await refresh();
       setMessage("已完成投票，付款確認後不可再次修改。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "投票失敗");
+      setMessage(toFriendlyWalletError(error, "投票付款未成功，請重新操作。"));
     } finally {
       setActionPending(false);
     }
@@ -465,8 +467,9 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
             toStableKey("merchant", merchant.id),
             menuSnapshotHash,
             orderDetailHash,
+            hashParticipantAddresses([account]),
             merchant.payoutAddress as `0x${string}`,
-            [account],
+            1n,
             BigInt(totalQuantity),
             BigInt(result.quote.subtotalWei)
           ],
@@ -538,7 +541,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       setMessage("已送出點餐並完成付款。");
       router.push(`/member/ordering/submitted/${detail.id}`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "點餐失敗");
+      setMessage(toFriendlyWalletError(error, "付款未成功，請重新操作。"));
     } finally {
       setActionPending(false);
     }
@@ -575,7 +578,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       await refresh();
       setMessage("已確認接收訂單。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "確認接收失敗");
+      setMessage(toFriendlyWalletError(error, "確認收貨未成功，請重新操作。"));
     } finally {
       setActionPending(false);
     }

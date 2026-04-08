@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { confirmMemberOrder, fetchContractInfo, fetchMyOrderHistory, type ContractInfo, type MemberOrderHistory } from "@/lib/api";
-import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress } from "@/lib/chain";
+import { ESCROW_ABI, ensureSepoliaClients, isUsableContractAddress, toFriendlyWalletError } from "@/lib/chain";
 import { OrderSummaryCard } from "@/components/member-order-shared";
 
 export function MemberOrderHistoryView() {
@@ -47,7 +47,7 @@ export function MemberOrderHistoryView() {
       await refresh();
       setMessage("已確認接收訂單。");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "確認接收失敗");
+      setMessage(toFriendlyWalletError(error, "確認收貨未成功，請重新操作。"));
     } finally {
       setPending(false);
     }
