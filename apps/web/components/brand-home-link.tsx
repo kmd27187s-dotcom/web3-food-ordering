@@ -17,7 +17,7 @@ export function BrandHomeLink({ children }: { children: ReactNode }) {
 
 function resolveHomeHref(pathname: string) {
   if (pathname.startsWith("/admin")) return "/admin";
-  if (pathname.startsWith("/merchant")) return "/merchant/profile";
+  if (pathname.startsWith("/merchant")) return "/merchant";
   if (pathname.startsWith("/member") || pathname.startsWith("/records")) return "/member";
   return "/";
 }

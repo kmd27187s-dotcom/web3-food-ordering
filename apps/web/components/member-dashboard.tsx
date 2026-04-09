@@ -90,7 +90,27 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
     return <div className="rounded-[1.5rem] border border-border bg-card p-8">找不到會員 session，請重新登入。</div>;
   }
 
-  const activeProposalCount = state.proposals.filter((proposal) => ["proposing", "voting", "ordering"].includes(proposal.status)).length;
+  const now = Date.now();
+  const activeProposalCount = state.proposals.filter((proposal) => {
+    if (proposal.status === "proposing" || proposal.status === "voting") return true;
+    const hasWinner = proposal.options.some((option) => option.id === proposal.winnerOptionId);
+    const deadline = new Date(proposal.orderDeadline).getTime();
+    return hasWinner && Number.isFinite(deadline) && deadline > now;
+  }).length;
+  const submittedProposalCount = Array.from(
+    new Set(
+      state.proposals
+        .filter((proposal) => {
+          const hasWinner = proposal.options.some((option) => option.id === proposal.winnerOptionId);
+          const deadlinePassed = new Date(proposal.orderDeadline).getTime() <= now;
+          return hasWinner && deadlinePassed && proposal.orders.length > 0 && proposal.orders.some((order) => order.status !== "platform_paid");
+        })
+        .map((proposal) => proposal.id)
+    )
+  ).length;
+  const historyProposalCount = Array.from(
+    new Set((state.orderHistory?.orders || []).filter((order) => order.status === "platform_paid").map((order) => order.proposalId))
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -112,6 +132,8 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
             <LinkedStat label="參與群組數" value={`${state.groups.length}`} href="/member/groups" />
             <LinkedStat label="訂單紀錄" value={`${state.orderHistory?.orders.length || 0}`} href="/member/orders" />
             <LinkedStat label="成立中訂單數" value={`${activeProposalCount}`} href="/member/ongoing-orders" />
+            <LinkedStat label="完成送出訂單" value={`${submittedProposalCount}`} href="/member/ordering/submitted" />
+            <LinkedStat label="歷史訂單" value={`${historyProposalCount}`} href="/member/orders" />
             <LinkedStat label="提案優惠券" value={`${state.member.proposalCouponCount} 張`} href="/records?tab=proposal-coupon" />
             <LinkedStat label="投票優惠券" value={`${state.member.voteCouponCount} 張`} href="/records?tab=vote-coupon" />
             <LinkedStat label="建立訂單優惠券" value={`${state.member.createOrderCouponCount} 張`} href="/records?tab=create-order-coupon" />

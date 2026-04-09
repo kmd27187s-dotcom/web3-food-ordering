@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +36,7 @@ const statusMeta = {
 } as const;
 
 export function MerchantDashboard() {
+  const searchParams = useSearchParams();
   const [member, setMember] = useState<Member | null>(null);
   const [contractInfo, setContractInfo] = useState<ContractInfo | null>(null);
   const [data, setData] = useState<MerchantDashboardData | null>(null);
@@ -67,6 +69,89 @@ export function MerchantDashboard() {
       .catch((error) => setMessage(error instanceof Error ? error.message : "讀取店家資料失敗"))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    const requestedStatus = searchParams.get("status");
+    if (
+      requestedStatus === "all" ||
+      requestedStatus === "pending" ||
+      requestedStatus === "accepted" ||
+      requestedStatus === "completed" ||
+      requestedStatus === "payout" ||
+      requestedStatus === "settled"
+    ) {
+      setActiveOrderFilter(requestedStatus);
+      return;
+    }
+    setActiveOrderFilter("all");
+  }, [searchParams]);
+
+  const safeOrders = data?.orders || [];
+  const filteredOrders = safeOrders.filter((order) => matchesOrderFilter(order.status, activeOrderFilter));
+  const groupedOrders = useMemo(() => {
+    const grouped = new Map<number, {
+      proposalId: number;
+      title: string;
+      createdBy: number;
+      createdByName: string;
+      createdAt: string;
+      amountWei: bigint;
+      memberCount: number;
+      statuses: string[];
+      orderIds: number[];
+    }>();
+    filteredOrders.forEach((order) => {
+      const current = grouped.get(order.proposalId);
+      if (current) {
+        current.amountWei += BigInt(order.amountWei || "0");
+        current.memberCount += 1;
+        current.statuses.push(order.status);
+        current.orderIds.push(order.id);
+        if (new Date(order.createdAt).getTime() < new Date(current.createdAt).getTime()) current.createdAt = order.createdAt;
+        return;
+      }
+      grouped.set(order.proposalId, {
+        proposalId: order.proposalId,
+        title: order.title || `訂單 #${order.proposalId}`,
+        createdBy: order.createdBy,
+        createdByName: order.createdByName || "",
+        createdAt: order.createdAt,
+        amountWei: BigInt(order.amountWei || "0"),
+        memberCount: 1,
+        statuses: [order.status],
+        orderIds: [order.id],
+      });
+    });
+    return Array.from(grouped.values()).sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  }, [filteredOrders]);
+  const allGroupedOrders = useMemo(() => {
+    const grouped = new Map<number, { proposalId: number; statuses: string[] }>();
+    safeOrders.forEach((order) => {
+      const current = grouped.get(order.proposalId);
+      if (current) {
+        current.statuses.push(order.status);
+        return;
+      }
+      grouped.set(order.proposalId, { proposalId: order.proposalId, statuses: [order.status] });
+    });
+    return Array.from(grouped.values()).map((group) => ({
+      proposalId: group.proposalId,
+      aggregateStatus: formatAggregateOrderStatus(group.statuses)
+    }));
+  }, [safeOrders]);
+  const pendingProposalCount = allGroupedOrders.filter((group) => group.aggregateStatus === "付款完成，待接單").length;
+  const acceptedProposalCount = allGroupedOrders.filter((group) => group.aggregateStatus === "已接單，製作中").length;
+  const completedProposalCount = allGroupedOrders.filter((group) => group.aggregateStatus === "已製作完成 / 待會員確認接收").length;
+  const payoutCount = allGroupedOrders.filter((group) => group.aggregateStatus === "會員已確認，待平台撥款").length;
+  const settledCount = allGroupedOrders.filter((group) => group.aggregateStatus === "平台已撥款完成").length;
+  const statusTabs = [
+    { id: "all", label: "全部訂單", count: allGroupedOrders.length },
+    { id: "pending", label: "待接單", count: pendingProposalCount },
+    { id: "accepted", label: "已接單 / 製作中", count: acceptedProposalCount },
+    { id: "completed", label: "已製作完成 / 待會員確認接收", count: completedProposalCount },
+    { id: "payout", label: "待平台撥款", count: payoutCount },
+    { id: "settled", label: "已完成訂單", count: settledCount }
+  ] as const;
 
   async function handleUpsertProfile() {
     setPending(true);
@@ -176,19 +261,6 @@ export function MerchantDashboard() {
     );
   }
 
-  const filteredOrders = data.orders.filter((order) => matchesOrderFilter(order.status, activeOrderFilter));
-  const awaitingMemberCount = data.orders.filter((order) => order.status === "merchant_completed").length;
-  const payoutCount = data.orders.filter((order) => order.status === "ready_for_payout").length;
-  const settledCount = data.orders.filter((order) => order.status === "platform_paid").length;
-  const statusTabs = [
-    { id: "all", label: "全部訂單", count: data.orders.length },
-    { id: "pending", label: "待接單", count: data.pendingOrderCount },
-    { id: "accepted", label: "已接單 / 製作中", count: data.acceptedOrderCount },
-    { id: "completed", label: "已製作完成 / 待會員確認接收", count: awaitingMemberCount },
-    { id: "payout", label: "待平台撥款", count: payoutCount },
-    { id: "settled", label: "已完成訂單", count: settledCount }
-  ] as const;
-
   return (
     <div className="space-y-6">
       <section className="meal-panel p-8">
@@ -241,30 +313,30 @@ export function MerchantDashboard() {
           先看訂單編號、金額與狀態；點進去訂單詳情頁後，再處理會員、餐點明細與接單操作。
         </p>
           <div className="mt-6 space-y-4">
-            {filteredOrders.length === 0 ? <p className="text-sm text-muted-foreground">這個狀態目前沒有訂單。</p> : null}
-            {filteredOrders.map((order) => (
-              <div key={order.id} className="rounded-[1.4rem] border border-border bg-background/70 p-5">
+            {groupedOrders.length === 0 ? <p className="text-sm text-muted-foreground">這個狀態目前沒有訂單。</p> : null}
+            {groupedOrders.map((order) => (
+              <div key={order.proposalId} className="rounded-[1.4rem] border border-border bg-background/70 p-5">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <p className="font-bold">訂單 #{order.id}</p>
-                    <p className="mt-1 text-sm text-muted-foreground">{new Date(order.createdAt).toLocaleString("zh-TW")}</p>
+                    <p className="font-bold">{order.title}</p>
+                    <p className="mt-1 text-sm text-muted-foreground">建立者：{order.createdByName.trim() || "未知"} · {new Date(order.createdAt).toLocaleString("zh-TW")} · {order.memberCount} 位成員點餐</p>
                   </div>
                   <div className="text-right">
-                    <p className="font-bold">{formatWei(order.amountWei)}</p>
-                    <p className="text-sm text-muted-foreground">{formatOrderStatus(order.status)}</p>
+                    <p className="font-bold">{formatWei(order.amountWei.toString())}</p>
+                    <p className="text-sm text-muted-foreground">{formatAggregateOrderStatus(order.statuses)}</p>
                   </div>
                 </div>
                 <div className="mt-4 flex flex-wrap gap-3">
                   <Button asChild variant="secondary">
-                    <Link href={`/merchant/orders/${order.id}`}>查看詳細資料</Link>
+                    <Link href={`/merchant/orders/${order.orderIds[0]}`}>查看詳細資料</Link>
                   </Button>
-                  {order.status === "payment_received" || order.status === "paid_local" || order.status === "paid_onchain" ? (
-                    <Button disabled={pending} onClick={() => handleAccept(order.id)}>
+                  {order.statuses.some((status) => status === "payment_received" || status === "paid_local" || status === "paid_onchain") ? (
+                    <Button disabled={pending} onClick={() => Promise.all(order.orderIds.map((id) => handleAccept(id))).catch(() => undefined)}>
                       接收訂單
                     </Button>
                   ) : null}
-                  {order.status === "merchant_accepted" ? (
-                    <Button variant="secondary" disabled={pending} onClick={() => handleComplete(order.id)}>
+                  {order.statuses.some((status) => status === "merchant_accepted") ? (
+                    <Button variant="secondary" disabled={pending} onClick={() => Promise.all(order.orderIds.map((id) => handleComplete(id))).catch(() => undefined)}>
                       標記已做完
                     </Button>
                   ) : null}
@@ -277,6 +349,15 @@ export function MerchantDashboard() {
       {message ? <p className="text-sm text-[hsl(7_65%_42%)]">{message}</p> : null}
     </div>
   );
+}
+
+function formatAggregateOrderStatus(statuses: string[]) {
+  if (statuses.some((status) => status === "payment_received" || status === "paid_local" || status === "paid_onchain")) return "付款完成，待接單";
+  if (statuses.some((status) => status === "merchant_accepted")) return "已接單，製作中";
+  if (statuses.some((status) => status === "merchant_completed")) return "已製作完成 / 待會員確認接收";
+  if (statuses.some((status) => status === "ready_for_payout")) return "會員已確認，待平台撥款";
+  if (statuses.every((status) => status === "platform_paid")) return "平台已撥款完成";
+  return "處理中";
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

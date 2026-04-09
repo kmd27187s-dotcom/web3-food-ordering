@@ -40,6 +40,10 @@ export function getOrderDisplayTitle(order: Order) {
   return order.merchantName || order.merchantId || `訂單 #${order.id}`;
 }
 
+function orderCreatorName(order: Order) {
+  return order.createdByName?.trim() || order.memberName?.trim() || "未知";
+}
+
 export function buildOrderTimeline(order: Order) {
   const createdAt = order.createdAt;
   const acceptedAt =
@@ -80,6 +84,7 @@ export function OrderSummaryCard({
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="font-bold">{getOrderDisplayTitle(order)}</p>
+          <p className="mt-2 text-sm text-muted-foreground">訂單建立者：{orderCreatorName(order)}</p>
           <p className="mt-2 text-sm text-muted-foreground">店家：{order.merchantName || order.merchantId}</p>
           <p className="mt-1 text-sm text-muted-foreground">建立時間：{new Date(order.createdAt).toLocaleString("zh-TW")}</p>
           <p className="mt-1 text-sm text-muted-foreground">狀態：{formatOrderStatus(order.status)}</p>
@@ -136,6 +141,7 @@ export function OrderDetailPanel({
         <div className="meal-panel p-8">
           <p className="meal-kicker">Summary</p>
           <div className="mt-6 space-y-4 text-sm">
+            <InfoRow label="訂單建立者" value={orderCreatorName(order)} />
             <InfoRow label="訂購會員" value={order.memberName} />
             <InfoRow label="店家" value={order.merchantName || order.merchantId} />
             <InfoRow label="訂單金額" value={formatWei(order.amountWei)} />

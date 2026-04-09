@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strconv"
 	"strings"
@@ -472,7 +473,7 @@ func (s *Server) handleAdminMarkOrderPaid(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid order id")
 		return
 	}
-	orders, err := s.processAdminPayouts(r.Context(), []int64{orderID})
+	orders, err := s.processAdminPayouts(r.Context(), []int64{orderID}, "", "", false)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -480,15 +481,32 @@ func (s *Server) handleAdminMarkOrderPaid(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, orders[0])
 }
 
+func (s *Server) handleAdminCancelOrderPaid(w http.ResponseWriter, r *http.Request, memberID int64) {
+	orderID, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid order id")
+		return
+	}
+	order, err := s.orderRepo.UpdateAdminOrderStatus(orderID, "merchant_completed")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, order)
+}
+
 func (s *Server) handleAdminBatchMarkOrderPaid(w http.ResponseWriter, r *http.Request, memberID int64) {
 	var body struct {
-		OrderIDs []int64 `json:"orderIds"`
+		OrderIDs      []int64 `json:"orderIds"`
+		TxHash        string  `json:"txHash"`
+		ManualWallet  string  `json:"manualWallet"`
+		ManualPayout  bool    `json:"manualPayout"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	orders, err := s.processAdminPayouts(r.Context(), body.OrderIDs)
+	orders, err := s.processAdminPayouts(r.Context(), body.OrderIDs, body.TxHash, body.ManualWallet, body.ManualPayout)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -499,11 +517,11 @@ func (s *Server) handleAdminBatchMarkOrderPaid(w http.ResponseWriter, r *http.Re
 	})
 }
 
-func (s *Server) processAdminPayouts(ctx context.Context, orderIDs []int64) ([]*models.Order, error) {
+func (s *Server) processAdminPayouts(ctx context.Context, orderIDs []int64, txHash string, manualWallet string, manualPayout bool) ([]*models.Order, error) {
 	if len(orderIDs) == 0 {
 		return nil, errors.New("select at least one order")
 	}
-	if s.chain == nil {
+	if !manualPayout && s.chain == nil {
 		return nil, errors.New("blockchain client unavailable")
 	}
 	dashboard, err := s.adminRepo.AdminDashboard()
@@ -515,6 +533,13 @@ func (s *Server) processAdminPayouts(ctx context.Context, orderIDs []int64) ([]*
 		readyByID[order.OrderID] = order
 	}
 	seen := make(map[int64]struct{}, len(orderIDs))
+	type payoutBatch struct {
+		proposalID int64
+		wallet     string
+		totalWei   *big.Int
+		orderIDs   []int64
+	}
+	batches := make(map[int64]*payoutBatch)
 	results := make([]*models.Order, 0, len(orderIDs))
 	for _, orderID := range orderIDs {
 		if orderID <= 0 {
@@ -531,14 +556,45 @@ func (s *Server) processAdminPayouts(ctx context.Context, orderIDs []int64) ([]*
 		if !common.IsHexAddress(strings.TrimSpace(order.MerchantPayoutAddress)) {
 			return nil, fmt.Errorf("order %d has invalid merchant payout wallet", orderID)
 		}
-		if _, err := s.chain.SendNativeTransfer(ctx, order.MerchantPayoutAddress, order.AmountWei); err != nil {
-			return nil, err
+		batch := batches[order.ProposalID]
+		if batch == nil {
+			batch = &payoutBatch{
+				proposalID: order.ProposalID,
+				wallet:     strings.TrimSpace(order.MerchantPayoutAddress),
+				totalWei:   big.NewInt(0),
+			}
+			batches[order.ProposalID] = batch
 		}
-		updated, err := s.orderRepo.UpdateAdminOrderStatus(orderID, "platform_paid")
-		if err != nil {
-			return nil, err
+		if !strings.EqualFold(batch.wallet, strings.TrimSpace(order.MerchantPayoutAddress)) {
+			return nil, fmt.Errorf("proposal %d contains multiple payout wallets", order.ProposalID)
 		}
-		results = append(results, updated)
+		amount, ok := new(big.Int).SetString(strings.TrimSpace(order.AmountWei), 10)
+		if !ok {
+			return nil, fmt.Errorf("order %d has invalid payout amount", orderID)
+		}
+		batch.totalWei.Add(batch.totalWei, amount)
+		batch.orderIDs = append(batch.orderIDs, orderID)
+	}
+	for _, batch := range batches {
+		if manualPayout {
+			if strings.TrimSpace(txHash) == "" {
+				return nil, errors.New("missing payout transaction hash")
+			}
+			if !common.IsHexAddress(strings.TrimSpace(manualWallet)) {
+				return nil, errors.New("invalid manual payout wallet")
+			}
+		} else {
+			if _, err := s.chain.SendNativeTransfer(ctx, batch.wallet, batch.totalWei.String()); err != nil {
+				return nil, err
+			}
+		}
+		for _, orderID := range batch.orderIDs {
+			updated, err := s.orderRepo.UpdateAdminOrderStatus(orderID, "platform_paid")
+			if err != nil {
+				return nil, err
+			}
+			results = append(results, updated)
+		}
 	}
 	return results, nil
 }

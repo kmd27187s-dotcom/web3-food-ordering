@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log"
+	"math/big"
 	"time"
 
 	"mealvoting/backend/blockchain"
@@ -148,16 +149,45 @@ func RunAutoPayoutProcessor(ctx context.Context, logger *log.Logger, store repos
 			return
 		}
 		now := time.Now().UTC()
+		type payoutBatch struct {
+			wallet   string
+			totalWei *big.Int
+			orderIDs []int64
+		}
+		batches := make(map[int64]*payoutBatch)
 		for _, order := range dashboard.ReadyPayoutOrders {
 			if order == nil || order.AutoPayoutAt == nil || now.Before(order.AutoPayoutAt.UTC()) {
 				continue
 			}
-			if _, err := chain.SendNativeTransfer(ctx, order.MerchantPayoutAddress, order.AmountWei); err != nil {
-				logger.Printf("auto payout order %d transfer failed: %v", order.OrderID, err)
+			batch := batches[order.ProposalID]
+			if batch == nil {
+				batch = &payoutBatch{
+					wallet:   order.MerchantPayoutAddress,
+					totalWei: big.NewInt(0),
+				}
+				batches[order.ProposalID] = batch
+			}
+			if batch.wallet != order.MerchantPayoutAddress {
+				logger.Printf("auto payout proposal %d skipped: inconsistent payout wallet", order.ProposalID)
 				continue
 			}
-			if _, err := store.UpdateAdminOrderStatus(order.OrderID, "platform_paid"); err != nil {
-				logger.Printf("auto payout order %d sync failed: %v", order.OrderID, err)
+			amount, ok := new(big.Int).SetString(order.AmountWei, 10)
+			if !ok {
+				logger.Printf("auto payout order %d skipped: invalid amount %q", order.OrderID, order.AmountWei)
+				continue
+			}
+			batch.totalWei.Add(batch.totalWei, amount)
+			batch.orderIDs = append(batch.orderIDs, order.OrderID)
+		}
+		for proposalID, batch := range batches {
+			if _, err := chain.SendNativeTransfer(ctx, batch.wallet, batch.totalWei.String()); err != nil {
+				logger.Printf("auto payout proposal %d transfer failed: %v", proposalID, err)
+				continue
+			}
+			for _, orderID := range batch.orderIDs {
+				if _, err := store.UpdateAdminOrderStatus(orderID, "platform_paid"); err != nil {
+					logger.Printf("auto payout order %d sync failed: %v", orderID, err)
+				}
 			}
 		}
 	}

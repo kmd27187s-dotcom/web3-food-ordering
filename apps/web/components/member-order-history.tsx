@@ -2,16 +2,13 @@
 
 import { useEffect, useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { confirmMemberOrder, fetchContractInfo, fetchMyOrderHistory, type ContractInfo, type MemberOrderHistory } from "@/lib/api";
-import { toFriendlyWalletError } from "@/lib/chain";
+import { fetchContractInfo, fetchMyOrderHistory, type ContractInfo, type MemberOrderHistory } from "@/lib/api";
 import { OrderSummaryCard } from "@/components/member-order-shared";
 
 export function MemberOrderHistoryView() {
   const [history, setHistory] = useState<MemberOrderHistory | null>(null);
   const [contractInfo, setContractInfo] = useState<ContractInfo | null>(null);
   const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [sortBy, setSortBy] = useState("newest");
 
@@ -26,19 +23,6 @@ export function MemberOrderHistoryView() {
       .catch((error) => setMessage(error instanceof Error ? error.message : "讀取訂單紀錄失敗"))
       .finally(() => setLoading(false));
   }, []);
-
-  async function handleConfirm(orderId: number) {
-    setPending(true);
-    try {
-      await confirmMemberOrder(orderId);
-      await refresh();
-      setMessage("已確認接收訂單。");
-    } catch (error) {
-      setMessage(toFriendlyWalletError(error, "確認收貨未成功，請重新操作。"));
-    } finally {
-      setPending(false);
-    }
-  }
 
   if (loading) return <div className="rounded-[1.5rem] border border-border bg-card p-8">正在載入訂單紀錄...</div>;
   if (!history) return <div className="rounded-[1.5rem] border border-border bg-card p-8 text-sm text-[hsl(7_65%_42%)]">{message || "找不到訂單資料"}</div>;
@@ -89,9 +73,6 @@ export function MemberOrderHistoryView() {
             key={order.id}
             order={order}
             detailHref={`/member/orders/${order.id}`}
-            action={order.status === "merchant_completed" ? (
-              <Button onClick={() => handleConfirm(order.id)} disabled={pending}>確認接收</Button>
-            ) : undefined}
           />
         ))}
       </section>

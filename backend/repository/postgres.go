@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/big"
 	"sort"
 	"strings"
 	"time"
@@ -291,6 +292,33 @@ func (s *PostgresStore) proposalTitleByID(ctx context.Context, proposalID int64)
 		return ""
 	}
 	return strings.TrimSpace(proposal.Title)
+}
+
+func (s *PostgresStore) proposalCreatorMetaByID(ctx context.Context, proposalID int64) (int64, string) {
+	var row struct {
+		CreatedBy     int64
+		CreatedByName string
+	}
+	if err := s.db.WithContext(ctx).
+		Table("proposals").
+		Select("created_by, created_by_name").
+		Where("id = ?", proposalID).
+		Scan(&row).Error; err != nil {
+		return 0, ""
+	}
+	if strings.TrimSpace(row.CreatedByName) == "" && row.CreatedBy > 0 {
+		var member struct {
+			DisplayName string
+		}
+		if err := s.db.WithContext(ctx).
+			Table("members").
+			Select("display_name").
+			Where("id = ?", row.CreatedBy).
+			Scan(&member).Error; err == nil {
+			row.CreatedByName = strings.TrimSpace(member.DisplayName)
+		}
+	}
+	return row.CreatedBy, row.CreatedByName
 }
 
 type postgresOrderItemModel struct {
@@ -1376,29 +1404,90 @@ func (s *PostgresStore) SaveOrder(proposalID, memberID int64, quote *models.Orde
 			sig.AmountWei = quote.SubtotalWei
 		}
 		status := "payment_received"
-		order = postgresOrderModel{
-			ProposalID:         proposalID,
-			MemberID:           memberID,
-			MemberName:         memberDisplayName,
-			MerchantID:         quote.MerchantID,
-			EscrowOrderID:      escrowOrderID,
-			OrderHash:          sig.OrderHash,
-			AmountWei:          sig.AmountWei,
-			Status:             status,
-			SignatureAmountWei: sig.AmountWei,
-			SignatureExpiry:    sig.Expiry,
-			SignatureValue:     sig.Signature,
-			SignatureDigest:    sig.Digest,
-			SignerAddress:      sig.SignerAddress,
-			ContractAddress:    sig.ContractAddress,
-			TokenAddress:       sig.TokenAddress,
-			CreatedAt:          time.Now().UTC(),
+		var existing postgresOrderModel
+		findErr := tx.Where("proposal_id = ? AND member_id = ?", proposalID, memberID).Order("id DESC").First(&existing).Error
+		if findErr != nil && !errors.Is(findErr, gorm.ErrRecordNotFound) {
+			return findErr
 		}
-		if err := tx.Create(&order).Error; err != nil {
+		isUpdate := findErr == nil
+		if isUpdate && normalizeOrderStatus(existing.Status) != "payment_received" {
+			return errors.New("ordering already locked for this member")
+		}
+		if isUpdate {
+			order = existing
+			currentAmount := bigIntFromString(existing.AmountWei)
+			newAmount := new(big.Int).Add(currentAmount, bigIntFromString(sig.AmountWei))
+			order.MemberName = memberDisplayName
+			order.MerchantID = quote.MerchantID
+			order.EscrowOrderID = escrowOrderID
+			order.AmountWei = newAmount.String()
+			order.Status = status
+			order.SignatureAmountWei = sig.AmountWei
+			order.SignatureExpiry = sig.Expiry
+			order.SignatureValue = sig.Signature
+			order.SignatureDigest = sig.Digest
+			order.SignerAddress = sig.SignerAddress
+			order.ContractAddress = sig.ContractAddress
+			order.TokenAddress = sig.TokenAddress
+			if err := tx.Save(&order).Error; err != nil {
+				return err
+			}
+		} else {
+			order = postgresOrderModel{
+				ProposalID:         proposalID,
+				MemberID:           memberID,
+				MemberName:         memberDisplayName,
+				MerchantID:         quote.MerchantID,
+				EscrowOrderID:      escrowOrderID,
+				OrderHash:          sig.OrderHash,
+				AmountWei:          sig.AmountWei,
+				Status:             status,
+				SignatureAmountWei: sig.AmountWei,
+				SignatureExpiry:    sig.Expiry,
+				SignatureValue:     sig.Signature,
+				SignatureDigest:    sig.Digest,
+				SignerAddress:      sig.SignerAddress,
+				ContractAddress:    sig.ContractAddress,
+				TokenAddress:       sig.TokenAddress,
+				CreatedAt:          time.Now().UTC(),
+			}
+			if err := tx.Create(&order).Error; err != nil {
+				return err
+			}
+		}
+
+		existingItems := map[string]*models.OrderItem{}
+		if isUpdate {
+			var rows []postgresOrderItemModel
+			if err := tx.Where("order_id = ?", order.ID).Find(&rows).Error; err != nil {
+				return err
+			}
+			for _, row := range rows {
+				existingItems[row.MenuItemID] = &models.OrderItem{
+					MenuItemID: row.MenuItemID,
+					Name:       row.Name,
+					Quantity:   row.Quantity,
+					PriceWei:   row.PriceWei,
+				}
+			}
+		}
+		for _, item := range quote.Items {
+			if current, ok := existingItems[item.MenuItemID]; ok {
+				current.Quantity += item.Quantity
+			} else {
+				existingItems[item.MenuItemID] = &models.OrderItem{
+					MenuItemID: item.MenuItemID,
+					Name:       item.Name,
+					Quantity:   item.Quantity,
+					PriceWei:   item.PriceWei,
+				}
+			}
+		}
+		if err := tx.Where("order_id = ?", order.ID).Delete(&postgresOrderItemModel{}).Error; err != nil {
 			return err
 		}
-		items = make([]*models.OrderItem, 0, len(quote.Items))
-		for _, item := range quote.Items {
+		items = make([]*models.OrderItem, 0, len(existingItems))
+		for _, item := range existingItems {
 			row := postgresOrderItemModel{
 				OrderID:    order.ID,
 				MenuItemID: item.MenuItemID,
@@ -1409,23 +1498,21 @@ func (s *PostgresStore) SaveOrder(proposalID, memberID int64, quote *models.Orde
 			if err := tx.Create(&row).Error; err != nil {
 				return err
 			}
-			items = append(items, &models.OrderItem{
-				MenuItemID: item.MenuItemID,
-				Name:       item.Name,
-				Quantity:   item.Quantity,
-				PriceWei:   item.PriceWei,
-			})
+			items = append(items, item)
 		}
 		return s.logUsageTxGorm(ctx, tx, memberID, proposalID, "place_order", "native", "debit", sig.AmountWei, "點餐支付已入平台錢包", sig.OrderHash)
 	})
 	if err != nil {
 		return nil, err
 	}
+	createdBy, createdByName := s.proposalCreatorMetaByID(ctx, order.ProposalID)
 	result := &models.Order{
 		ID:                    order.ID,
 		ProposalID:            order.ProposalID,
 		EscrowOrderID:         order.EscrowOrderID,
 		Title:                 s.proposalTitleByID(ctx, order.ProposalID),
+		CreatedBy:             createdBy,
+		CreatedByName:         createdByName,
 		MemberID:              order.MemberID,
 		MemberName:            order.MemberName,
 		MerchantID:            order.MerchantID,
@@ -1463,6 +1550,7 @@ func (s *PostgresStore) ListMemberOrders(memberID int64) ([]*models.Order, error
 	orders := make([]*models.Order, 0, len(rows))
 	for _, row := range rows {
 		title := s.proposalTitleByID(ctx, row.ProposalID)
+		createdBy, createdByName := s.proposalCreatorMetaByID(ctx, row.ProposalID)
 		var merchant postgresMerchantModel
 		merchantName := ""
 		merchantPayoutAddress := ""
@@ -1489,6 +1577,8 @@ func (s *PostgresStore) ListMemberOrders(memberID int64) ([]*models.Order, error
 			ProposalID:            row.ProposalID,
 			EscrowOrderID:         row.EscrowOrderID,
 			Title:                 title,
+			CreatedBy:             createdBy,
+			CreatedByName:         createdByName,
 			MemberID:              row.MemberID,
 			MemberName:            row.MemberName,
 			MerchantID:            row.MerchantID,
@@ -1548,11 +1638,15 @@ func (s *PostgresStore) UpdateMemberOrderStatus(orderID, memberID int64, status 
 	ctx := context.Background()
 	nextStatus := strings.TrimSpace(status)
 	var row postgresOrderModel
-	if err := s.db.WithContext(ctx).First(&row, "id = ? AND member_id = ?", orderID, memberID).Error; err != nil {
+	if err := s.db.WithContext(ctx).First(&row, "id = ?", orderID).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, errors.New("order not found")
 		}
 		return nil, err
+	}
+	proposalCreatorID, _ := s.proposalCreatorMetaByID(ctx, row.ProposalID)
+	if proposalCreatorID != memberID {
+		return nil, errors.New("only the proposal creator can confirm receipt")
 	}
 	if !isValidMemberOrderTransition(row.Status, nextStatus) {
 		return nil, fmt.Errorf("cannot change order from %s to %s", row.Status, nextStatus)
@@ -1637,7 +1731,7 @@ func isValidMemberOrderTransition(currentStatus, nextStatus string) bool {
 func isValidAdminOrderTransition(currentStatus, nextStatus string) bool {
 	current := normalizeOrderStatus(strings.TrimSpace(currentStatus))
 	next := strings.TrimSpace(nextStatus)
-	return current == "ready_for_payout" && next == "platform_paid"
+	return current == "ready_for_payout" && (next == "platform_paid" || next == "merchant_completed")
 }
 
 func normalizeOrderStatus(status string) string {
@@ -2366,6 +2460,7 @@ func (s *PostgresStore) ListMerchantOrders(merchantID string) ([]*models.Order, 
 	items := make([]*models.Order, 0, len(rows))
 	for _, row := range rows {
 		title := s.proposalTitleByID(ctx, row.ProposalID)
+		createdBy, createdByName := s.proposalCreatorMetaByID(ctx, row.ProposalID)
 		var orderItems []postgresOrderItemModel
 		if err := s.db.WithContext(ctx).Where("order_id = ?", row.ID).Order("id ASC").Find(&orderItems).Error; err != nil {
 			return nil, err
@@ -2384,6 +2479,8 @@ func (s *PostgresStore) ListMerchantOrders(merchantID string) ([]*models.Order, 
 			ProposalID:            row.ProposalID,
 			EscrowOrderID:         row.EscrowOrderID,
 			Title:                 title,
+			CreatedBy:             createdBy,
+			CreatedByName:         createdByName,
 			MemberID:              row.MemberID,
 			MemberName:            row.MemberName,
 			MerchantID:            row.MerchantID,
@@ -2618,11 +2715,14 @@ func (s *PostgresStore) AdminDashboard() (*models.AdminDashboard, error) {
 	}
 	readyPayoutOrders := make([]*models.ReadyPayoutOrder, 0, len(payoutRows))
 	for _, row := range payoutRows {
+		createdBy, createdByName := s.proposalCreatorMetaByID(ctx, row.ProposalID)
 		readyPayoutOrders = append(readyPayoutOrders, &models.ReadyPayoutOrder{
 			OrderID:               row.ID,
 			ProposalID:            row.ProposalID,
 			EscrowOrderID:         row.EscrowOrderID,
 			Title:                 s.proposalTitleByID(ctx, row.ProposalID),
+			CreatedBy:             createdBy,
+			CreatedByName:         createdByName,
 			MemberName:            row.MemberName,
 			MerchantID:            row.MerchantID,
 			MerchantName:          row.MerchantName,
@@ -2644,6 +2744,7 @@ func (s *PostgresStore) AdminDashboard() (*models.AdminDashboard, error) {
 		PendingMenuReviews:     pendingMenuReviews,
 		PendingMerchantDelists: pendingMerchantDelists,
 		PlatformTreasury:       s.ContractInfo().PlatformTreasury,
+		AutoPayoutSigner:       s.ContractInfo().SignerAddress,
 		GovernanceParams:       params,
 		MenuChangeRequests:     requests,
 		MerchantDelistRequests: delistRequests,
@@ -2717,6 +2818,7 @@ func (s *PostgresStore) AdminInsights() (*models.AdminInsights, error) {
 	orders := make([]*models.Order, 0, len(orderRows))
 	for _, row := range orderRows {
 		title := s.proposalTitleByID(ctx, row.ProposalID)
+		createdBy, createdByName := s.proposalCreatorMetaByID(ctx, row.ProposalID)
 		var merchant postgresMerchantModel
 		merchantName := ""
 		merchantPayoutAddress := ""
@@ -2742,6 +2844,8 @@ func (s *PostgresStore) AdminInsights() (*models.AdminInsights, error) {
 			ID:                    row.ID,
 			ProposalID:            row.ProposalID,
 			Title:                 title,
+			CreatedBy:             createdBy,
+			CreatedByName:         createdByName,
 			MemberID:              row.MemberID,
 			MemberName:            row.MemberName,
 			MerchantID:            row.MerchantID,
@@ -3575,10 +3679,17 @@ func (s *PostgresStore) loadProposal(ctx context.Context, proposalID int64) (*mo
 		}
 		return nil, err
 	}
+	createdBy, createdByName := s.proposalCreatorMetaByID(ctx, proposalID)
+	if createdBy == 0 {
+		createdBy = proposalRow.CreatedBy
+	}
+	if strings.TrimSpace(createdByName) == "" {
+		createdByName = strings.TrimSpace(proposalRow.CreatedByName)
+	}
 	proposal := &models.Proposal{
 		ID: proposalRow.ID, Title: proposalRow.Title, Description: proposalRow.Description, MerchantGroup: proposalRow.MerchantGroup,
 		MealPeriod: proposalRow.MealPeriod, ProposalDate: proposalRow.ProposalDate, MaxOptions: proposalRow.MaxOptions,
-		CreatedBy: proposalRow.CreatedBy, CreatedByName: proposalRow.CreatedByName,
+		CreatedBy: createdBy, CreatedByName: createdByName,
 		ProposalDeadline: proposalRow.ProposalDeadline.UTC(), VoteDeadline: proposalRow.VoteDeadline.UTC(), OrderDeadline: proposalRow.OrderDeadline.UTC(),
 		WinnerOptionID: proposalRow.WinnerOptionID, RewardsApplied: proposalRow.RewardsApplied, CreatedAt: proposalRow.CreatedAt.UTC(),
 		SettledAt: proposalRow.SettledAt, CreateFeeWei: proposalRow.CreateFeeWei, CreateFeeRefundWei: proposalRow.CreateFeeRefundWei,
@@ -3654,6 +3765,7 @@ func (s *PostgresStore) loadProposal(ctx context.Context, proposalID int64) (*mo
 		merchantName := ""
 		merchantPayoutAddress := ""
 		title := s.proposalTitleByID(ctx, row.ProposalID)
+		createdBy, createdByName := s.proposalCreatorMetaByID(ctx, row.ProposalID)
 		if merchant, err := s.GetMerchant(row.MerchantID); err == nil {
 			merchantName = merchant.Name
 			merchantPayoutAddress = merchant.PayoutAddress
@@ -3662,6 +3774,8 @@ func (s *PostgresStore) loadProposal(ctx context.Context, proposalID int64) (*mo
 			ID:                    row.ID,
 			ProposalID:            row.ProposalID,
 			Title:                 title,
+			CreatedBy:             createdBy,
+			CreatedByName:         createdByName,
 			MemberID:              row.MemberID,
 			MemberName:            row.MemberName,
 			MerchantID:            row.MerchantID,
@@ -3884,6 +3998,14 @@ func (s *PostgresStore) logUsageTxGorm(ctx context.Context, tx *gorm.DB, memberI
 
 func pendingTxFromModel(record *postgresPendingTransactionModel) *models.PendingTransaction {
 	return &models.PendingTransaction{ID: record.ID, MemberID: record.MemberID, ProposalID: record.ProposalID, Action: record.Action, TxHash: record.TxHash, WalletAddress: record.WalletAddress, Status: record.Status, RelatedEvent: record.RelatedEvent, RelatedOrder: record.RelatedOrder, ErrorMessage: record.ErrorMessage, ConfirmedBlock: record.ConfirmedBlock, CreatedAt: record.CreatedAt.UTC().Format(time.RFC3339), UpdatedAt: record.UpdatedAt.UTC().Format(time.RFC3339)}
+}
+
+func bigIntFromString(value string) *big.Int {
+	n := new(big.Int)
+	if _, ok := n.SetString(strings.TrimSpace(value), 10); ok {
+		return n
+	}
+	return big.NewInt(0)
 }
 
 func (s *PostgresStore) deleteProposalRoundTxGorm(ctx context.Context, tx *gorm.DB, proposalID int64) error {

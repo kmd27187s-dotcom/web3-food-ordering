@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { fetchGroups, fetchProposals, type Group, type Proposal } from "@/lib/api";
 
@@ -40,10 +40,18 @@ export function MemberOngoingOrdersView() {
   }, []);
 
   const groupIds = new Set(groups.map((group) => group.id));
-  const active = useMemo(
-    () => proposals.filter((proposal) => groupIds.has(proposal.groupId) && ["proposing", "voting", "ordering"].includes(proposal.status)),
-    [proposals, groups]
-  );
+  const stageKeyForProposal = useCallback((proposal: Proposal) => {
+    if (!groupIds.has(proposal.groupId)) return null;
+    if (proposal.status === "proposing") return "proposing";
+    if (proposal.status === "voting") return "voting";
+    const orderDeadline = new Date(proposal.orderDeadline).getTime();
+    const hasWinner = proposal.options.some((option) => option.id === proposal.winnerOptionId);
+    if (hasWinner && Number.isFinite(orderDeadline) && orderDeadline > now) return "ordering";
+    return null;
+  }, [groupIds, now]);
+  const active = useMemo(() => {
+    return proposals.filter((proposal) => stageKeyForProposal(proposal) !== null);
+  }, [proposals, stageKeyForProposal]);
   const sections = [
     { key: "proposing", label: "店家提案階段", href: "/member/ordering/proposals" },
     { key: "voting", label: "投票階段", href: "/member/ordering/voting" },
@@ -62,14 +70,14 @@ export function MemberOngoingOrdersView() {
           {sections.map((section) => (
             <Link key={section.key} href={section.href} className="meal-stat transition hover:-translate-y-0.5 hover:border-[rgba(148,74,0,0.28)]">
               <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{section.label}</p>
-              <p className="mt-2 text-base font-semibold">{active.filter((proposal) => proposal.status === section.key).length} 筆</p>
+              <p className="mt-2 text-base font-semibold">{active.filter((proposal) => stageKeyForProposal(proposal) === section.key).length} 筆</p>
             </Link>
           ))}
         </div>
       </section>
 
       {sections.map((section) => {
-        const items = active.filter((proposal) => proposal.status === section.key);
+        const items = active.filter((proposal) => stageKeyForProposal(proposal) === section.key);
         return (
           <section key={section.key} className="meal-panel p-8">
             <div className="flex flex-wrap items-center justify-between gap-3">

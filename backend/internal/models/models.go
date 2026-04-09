@@ -195,6 +195,8 @@ type Order struct {
 	ProposalID            int64           `json:"proposalId"`
 	EscrowOrderID         *int64          `json:"escrowOrderId,omitempty"`
 	Title                 string          `json:"title"`
+	CreatedBy             int64           `json:"createdBy"`
+	CreatedByName         string          `json:"createdByName"`
 	MemberID              int64           `json:"memberId"`
 	MemberName            string          `json:"memberName"`
 	MerchantID            string          `json:"merchantId"`
@@ -449,6 +451,8 @@ type ReadyPayoutOrder struct {
 	ProposalID            int64      `json:"proposalId"`
 	EscrowOrderID         *int64     `json:"escrowOrderId,omitempty"`
 	Title                 string     `json:"title"`
+	CreatedBy             int64      `json:"createdBy"`
+	CreatedByName         string     `json:"createdByName"`
 	MemberName            string     `json:"memberName"`
 	MerchantID            string     `json:"merchantId"`
 	MerchantName          string     `json:"merchantName"`
@@ -470,6 +474,7 @@ type AdminDashboard struct {
 	PendingMenuReviews     int64                    `json:"pendingMenuReviews"`
 	PendingMerchantDelists int64                    `json:"pendingMerchantDelists"`
 	PlatformTreasury       string                   `json:"platformTreasury"`
+	AutoPayoutSigner       string                   `json:"autoPayoutSigner"`
 	GovernanceParams       *GovernanceParams        `json:"governanceParams,omitempty"`
 	MenuChangeRequests     []*MenuChangeRequest     `json:"menuChangeRequests"`
 	MerchantDelistRequests []*MerchantDelistRequest `json:"merchantDelistRequests"`

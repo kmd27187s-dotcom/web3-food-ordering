@@ -1,8 +1,6 @@
-import Link from "next/link";
-
 import { AppNav } from "@/components/app-nav";
 import { BrandHomeLink } from "@/components/brand-home-link";
-import { MerchantProfileManager } from "@/components/merchant-profile-manager";
+import { MerchantHomeOverview } from "@/components/merchant-home-overview";
 import { SessionGate } from "@/components/session-gate";
 
 export default function MerchantPage() {
@@ -13,7 +11,7 @@ export default function MerchantPage() {
         <AppNav />
       </div>
       <SessionGate>
-        <MerchantProfileManager />
+        <MerchantHomeOverview />
       </SessionGate>
     </main>
   );

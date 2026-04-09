@@ -136,6 +136,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /admin/platform-params", s.withAdmin(s.handleAdminGetPlatformParams))
 	mux.HandleFunc("POST /admin/platform-params", s.withAdmin(s.handleAdminUpdatePlatformParams))
 	mux.HandleFunc("POST /admin/orders/{id}/payout", s.withAdmin(s.handleAdminMarkOrderPaid))
+	mux.HandleFunc("POST /admin/orders/{id}/payout/cancel", s.withAdmin(s.handleAdminCancelOrderPaid))
 	mux.HandleFunc("POST /admin/orders/payout/batch", s.withAdmin(s.handleAdminBatchMarkOrderPaid))
 	mux.HandleFunc("GET /proposals", s.withSubscribed(s.handleListProposals))
 	mux.HandleFunc("POST /proposals", s.withSubscribed(s.handleCreateProposal))

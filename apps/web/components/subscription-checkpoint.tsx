@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { fetchContractInfo, fetchMe, fetchPublicGovernanceParams, registerPendingTransaction, syncSubscription, type ContractInfo, type GovernanceParams, type Member } from "@/lib/api";
+import { fetchContractInfo, fetchMe, fetchPublicGovernanceParams, getStoredToken, registerPendingTransaction, syncSubscription, type ContractInfo, type GovernanceParams, type Member } from "@/lib/api";
 import { isUsableContractAddress, sendNativePayment, toFriendlyWalletError } from "@/lib/chain";
 
 const SUBSCRIPTION_SYNC_KEY = "member-subscription-pending-sync";
@@ -41,6 +41,10 @@ export function SubscriptionCheckpoint() {
   const [message, setMessage] = useState("");
 
   useEffect(() => {
+    if (!getStoredToken()) {
+      router.replace("/");
+      return;
+    }
     Promise.all([fetchMe(), fetchContractInfo().catch(() => null), fetchPublicGovernanceParams().catch(() => null)])
       .then(([nextMember, nextContract, nextParams]) => {
         if (nextMember.subscriptionActive) {
@@ -52,6 +56,7 @@ export function SubscriptionCheckpoint() {
         setGovernanceParams(nextParams);
       })
       .catch((error) => {
+        router.replace("/");
         setMessage(error instanceof Error ? error.message : "目前無法讀取訂閱狀態");
       })
       .finally(() => setLoading(false));

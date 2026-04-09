@@ -187,6 +187,8 @@ export type Order = {
   id: number;
   proposalId: number;
   title?: string;
+  createdBy: number;
+  createdByName: string;
   memberId: number;
   memberName: string;
   merchantId: string;
@@ -374,6 +376,8 @@ export type ReadyPayoutOrder = {
   orderId: number;
   proposalId: number;
   title: string;
+  createdBy: number;
+  createdByName: string;
   memberName: string;
   merchantId: string;
   merchantName: string;
@@ -395,6 +399,7 @@ export type AdminDashboard = {
   pendingMenuReviews: number;
   pendingMerchantDelists: number;
   platformTreasury: string;
+  autoPayoutSigner: string;
   governanceParams?: GovernanceParams;
   menuChangeRequests: MenuChangeRequest[];
   merchantDelistRequests: MerchantDelistRequest[];
@@ -516,7 +521,8 @@ export async function apiRequest<T>(path: string, init: RequestInitExtra = {}): 
 }
 
 export async function fetchMe() {
-  return apiRequest<Member>("/members/me", { auth: true });
+  const member = await apiRequest<Member>("/members/me", { auth: true });
+  return normalizeMember(member);
 }
 
 export async function fetchContractInfo() {
@@ -566,15 +572,20 @@ export async function fetchMemberProfile(memberId: number) {
 }
 
 export async function fetchMyOrderHistory() {
-  return apiRequest<MemberOrderHistory>("/members/me/orders", { auth: true });
+  const history = await apiRequest<MemberOrderHistory>("/members/me/orders", { auth: true });
+  return {
+    orders: Array.isArray(history?.orders) ? history.orders.map(normalizeOrder) : []
+  };
 }
 
 export async function fetchProposals() {
-  return apiRequest<Proposal[]>("/proposals", { auth: true });
+  const proposals = await apiRequest<Proposal[]>("/proposals", { auth: true });
+  return Array.isArray(proposals) ? proposals.map(normalizeProposal) : [];
 }
 
 export async function fetchProposal(proposalId: number) {
-  return apiRequest<Proposal>(`/proposals/${proposalId}`, { auth: true });
+  const proposal = await apiRequest<Proposal>(`/proposals/${proposalId}`, { auth: true });
+  return normalizeProposal(proposal);
 }
 
 export async function createProposal(payload: {
@@ -849,7 +860,14 @@ export async function fetchMerchantDashboard() {
   const dashboard = await apiRequest<MerchantDashboard>("/merchant/dashboard", { auth: true });
   return {
     ...dashboard,
-    merchant: dashboard.merchant ? normalizeMerchant(dashboard.merchant) : null
+    merchant: dashboard?.merchant ? normalizeMerchant(dashboard.merchant) : null,
+    orders: Array.isArray(dashboard?.orders) ? dashboard.orders.map(normalizeOrder) : [],
+    menuChangeRequests: Array.isArray(dashboard?.menuChangeRequests) ? dashboard.menuChangeRequests : [],
+    acceptedOrderCount: Number(dashboard?.acceptedOrderCount || 0),
+    pendingOrderCount: Number(dashboard?.pendingOrderCount || 0),
+    completedOrderCount: Number(dashboard?.completedOrderCount || 0),
+    totalOrderCount: Number(dashboard?.totalOrderCount || 0),
+    totalRevenueWei: String(dashboard?.totalRevenueWei || "0")
   };
 }
 
@@ -931,6 +949,102 @@ function normalizeOptionalTimestamp(value?: string) {
   return value;
 }
 
+function normalizeMember(member: Member): Member {
+  return {
+    ...member,
+    displayName: member?.displayName || "",
+    points: Number(member?.points || 0),
+    proposalTicketCount: Number(member?.proposalTicketCount || 0),
+    voteTicketCount: Number(member?.voteTicketCount || 0),
+    createOrderTicketCount: Number(member?.createOrderTicketCount || 0),
+    proposalCouponCount: Number(member?.proposalCouponCount || 0),
+    voteCouponCount: Number(member?.voteCouponCount || 0),
+    createOrderCouponCount: Number(member?.createOrderCouponCount || 0),
+    claimableProposalTickets: Number(member?.claimableProposalTickets || 0),
+    claimableVoteTickets: Number(member?.claimableVoteTickets || 0),
+    claimableCreateOrderTickets: Number(member?.claimableCreateOrderTickets || 0),
+    claimableProposalCoupons: Number(member?.claimableProposalCoupons || 0),
+    claimableVoteCoupons: Number(member?.claimableVoteCoupons || 0),
+    claimableCreateOrderCoupons: Number(member?.claimableCreateOrderCoupons || 0),
+    subscriptionActive: Boolean(member?.subscriptionActive)
+  };
+}
+
+function normalizeOrder(order: Order): Order {
+  return {
+    ...order,
+    title: order?.title || "",
+    createdBy: Number(order?.createdBy || 0),
+    createdByName: order?.createdByName || "",
+    memberName: order?.memberName || "",
+    merchantId: order?.merchantId || "",
+    merchantName: order?.merchantName || "",
+    merchantPayoutAddress: order?.merchantPayoutAddress || "",
+    orderHash: order?.orderHash || "",
+    amountWei: String(order?.amountWei || "0"),
+    status: order?.status || "pending",
+    items: Array.isArray(order?.items) ? order.items : []
+  };
+}
+
+function normalizeProposalOption(option: ProposalOption): ProposalOption {
+  return {
+    ...option,
+    merchantId: option?.merchantId || "",
+    merchantName: option?.merchantName || "",
+    proposerMemberId: Number(option?.proposerMemberId || 0),
+    weightedVotes: Number(option?.weightedVotes || 0),
+    tokenStake: Number(option?.tokenStake || 0),
+    proposalFeePaidWei: Number(option?.proposalFeePaidWei || 0),
+    voteFeeCollectedWei: Number(option?.voteFeeCollectedWei || 0),
+    voteRefundWei: Number(option?.voteRefundWei || 0),
+    proposerRefundWei: Number(option?.proposerRefundWei || 0),
+    proposerRewardWei: Number(option?.proposerRewardWei || 0),
+    isWinner: Boolean(option?.isWinner),
+    usedProposalCoupon: Boolean(option?.usedProposalCoupon)
+  };
+}
+
+function normalizeVoteRecord(vote: VoteRecord): VoteRecord {
+  return {
+    ...vote,
+    memberId: Number(vote?.memberId || 0),
+    memberName: vote?.memberName || "",
+    optionId: Number(vote?.optionId || 0),
+    tokenAmount: Number(vote?.tokenAmount || 0),
+    feeAmountWei: Number(vote?.feeAmountWei || 0),
+    voteWeight: Number(vote?.voteWeight || 0),
+    voteCount: Number(vote?.voteCount || 0),
+    refundWei: Number(vote?.refundWei || 0),
+    useVoteCoupon: Boolean(vote?.useVoteCoupon)
+  };
+}
+
+function normalizeProposal(proposal: Proposal): Proposal {
+  return {
+    ...proposal,
+    id: Number(proposal?.id || 0),
+    title: proposal?.title || "",
+    description: proposal?.description || "",
+    merchantGroup: proposal?.merchantGroup || "",
+    mealPeriod: proposal?.mealPeriod || "",
+    groupId: Number(proposal?.groupId || 0),
+    createdBy: Number(proposal?.createdBy || 0),
+    createdByName: proposal?.createdByName || "",
+    status: proposal?.status || "proposing",
+    orderTotalWei: String(proposal?.orderTotalWei || "0"),
+    orderMemberCount: Number(proposal?.orderMemberCount || 0),
+    currentVoteOptionId: Number(proposal?.currentVoteOptionId || 0),
+    currentVoteTokenAmount: Number(proposal?.currentVoteTokenAmount || 0),
+    currentVoteWeight: Number(proposal?.currentVoteWeight || 0),
+    winnerOptionId: Number(proposal?.winnerOptionId || 0),
+    totalVoteCount: Number(proposal?.totalVoteCount || 0),
+    options: Array.isArray(proposal?.options) ? proposal.options.map(normalizeProposalOption) : [],
+    votes: Array.isArray(proposal?.votes) ? proposal.votes.map(normalizeVoteRecord) : [],
+    orders: Array.isArray(proposal?.orders) ? proposal.orders.map(normalizeOrder) : []
+  };
+}
+
 export async function acceptMerchantOrder(orderId: number) {
   return apiRequest<Order>(`/merchant/orders/${orderId}/accept`, {
     method: "POST",
@@ -963,11 +1077,27 @@ export async function markAdminOrderPaid(orderId: number) {
   });
 }
 
+export async function cancelAdminOrderPayout(orderId: number) {
+  return apiRequest<Order>(`/admin/orders/${orderId}/payout/cancel`, {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify({})
+  });
+}
+
 export async function markAdminOrdersPaid(orderIds: number[]) {
   return apiRequest<{ count: number; orders: Order[] }>(`/admin/orders/payout/batch`, {
     method: "POST",
     auth: true,
     body: JSON.stringify({ orderIds })
+  });
+}
+
+export async function syncAdminOrdersPaid(orderIds: number[], payload: { txHash: string; manualWallet: string }) {
+  return apiRequest<{ count: number; orders: Order[] }>(`/admin/orders/payout/batch`, {
+    method: "POST",
+    auth: true,
+    body: JSON.stringify({ orderIds, txHash: payload.txHash, manualWallet: payload.manualWallet, manualPayout: true })
   });
 }
 
@@ -993,7 +1123,39 @@ export async function withdrawMerchantMenuChange(changeId: number) {
 }
 
 export async function fetchAdminDashboard() {
-  return apiRequest<AdminDashboard>("/admin/dashboard", { auth: true });
+  const dashboard = await apiRequest<AdminDashboard>("/admin/dashboard", { auth: true });
+  return {
+    ...dashboard,
+    memberCount: Number(dashboard?.memberCount || 0),
+    groupCount: Number(dashboard?.groupCount || 0),
+    merchantCount: Number(dashboard?.merchantCount || 0),
+    orderCount: Number(dashboard?.orderCount || 0),
+    dinerCount: Number(dashboard?.dinerCount || 0),
+    totalServings: Number(dashboard?.totalServings || 0),
+    pendingMenuReviews: Number(dashboard?.pendingMenuReviews || 0),
+    pendingMerchantDelists: Number(dashboard?.pendingMerchantDelists || 0),
+    platformTreasury: dashboard?.platformTreasury || "",
+    autoPayoutSigner: dashboard?.autoPayoutSigner || "",
+    menuChangeRequests: Array.isArray(dashboard?.menuChangeRequests) ? dashboard.menuChangeRequests : [],
+    merchantDelistRequests: Array.isArray(dashboard?.merchantDelistRequests) ? dashboard.merchantDelistRequests : [],
+    readyPayoutOrders: Array.isArray(dashboard?.readyPayoutOrders) ? dashboard.readyPayoutOrders.map(normalizeReadyPayoutOrder) : []
+  };
+}
+
+function normalizeReadyPayoutOrder(order: ReadyPayoutOrder): ReadyPayoutOrder {
+  return {
+    ...order,
+    proposalId: Number(order?.proposalId || 0),
+    title: order?.title || "",
+    createdBy: Number(order?.createdBy || 0),
+    createdByName: order?.createdByName || "",
+    memberName: order?.memberName || "",
+    merchantId: order?.merchantId || "",
+    merchantName: order?.merchantName || "",
+    merchantPayoutAddress: order?.merchantPayoutAddress || "",
+    amountWei: String(order?.amountWei || "0"),
+    status: order?.status || "ready_for_payout"
+  };
 }
 
 export async function fetchAdminInsights() {

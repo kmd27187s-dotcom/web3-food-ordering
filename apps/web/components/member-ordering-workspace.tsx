@@ -16,6 +16,7 @@ import {
   fetchMe,
   fetchMerchant,
   fetchMerchants,
+  fetchProposal,
   fetchPublicGovernanceParams,
   fetchProposals,
   finalizeOrder,
@@ -108,7 +109,9 @@ function clearPendingOrderingSync() {
 export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; proposalId?: number }) {
   const router = useRouter();
   const replayedPendingSync = useRef(false);
+  const stageRedirected = useRef(false);
   const [state, setState] = useState<WorkspaceState>({ member: null, groups: [], proposals: [], merchants: [], contractInfo: null, governanceParams: null });
+  const [detailProposal, setDetailProposal] = useState<Proposal | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionPending, setActionPending] = useState(false);
   const [message, setMessage] = useState("");
@@ -128,13 +131,14 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
   const [stageSort, setStageSort] = useState<StageSortKey>("newest");
 
   const refresh = useCallback(async () => {
-    const [me, groups, proposals, contractInfo, merchants, governanceParams] = await Promise.all([
+    const [me, groups, proposals, contractInfo, merchants, governanceParams, singleProposal] = await Promise.all([
       fetchMe(),
       fetchGroups(),
       fetchProposals(),
       fetchContractInfo().catch(() => null),
       fetchMerchants().catch(() => []),
-      fetchPublicGovernanceParams().catch(() => null)
+      fetchPublicGovernanceParams().catch(() => null),
+      proposalId ? fetchProposal(proposalId).catch(() => null) : Promise.resolve(null)
     ]);
     const normalizedProposals = dedupeProposals(safeArray(proposals).map(normalizeProposal));
     setState({
@@ -145,6 +149,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       contractInfo,
       governanceParams
     });
+    setDetailProposal(singleProposal ? normalizeProposal(singleProposal) : null);
     setCreateDraft((current) => ({
       ...current,
       groupId: current.groupId || (groups[0] ? String(groups[0].id) : ""),
@@ -174,7 +179,11 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
   }, []);
 
   useEffect(() => {
-    if (stage !== "voting") return;
+    stageRedirected.current = false;
+  }, [proposalId, stage]);
+
+  useEffect(() => {
+    if (stage !== "voting" && stage !== "ordering") return;
     const timer = window.setInterval(() => {
       refresh().catch(() => undefined);
     }, 5000);
@@ -242,23 +251,29 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
   }, [menus, state.proposals]);
 
   const stageProposals = useMemo(() => {
+    const activeOrdering = (proposal: Proposal) =>
+      proposal.status !== "failed" &&
+      proposal.status !== "cancelled" &&
+      proposal.winnerOptionId > 0 &&
+      new Date(proposal.orderDeadline).getTime() > now;
     switch (stage) {
       case "proposal":
         return state.proposals.filter((proposal) => proposal.status === "proposing");
       case "voting":
         return state.proposals.filter((proposal) => proposal.status === "voting");
       case "ordering":
-        return state.proposals.filter((proposal) => proposal.status === "ordering");
+        return state.proposals.filter((proposal) => proposal.status === "ordering" || activeOrdering(proposal));
       case "submitted":
         return state.proposals.filter((proposal) => {
           const hasWinner = proposal.options.some((option) => option.id === proposal.winnerOptionId);
-          return hasWinner || proposal.orderMemberCount > 0 || proposal.orders.length > 0;
+          const orderDeadlinePassed = new Date(proposal.orderDeadline).getTime() <= now;
+          return orderDeadlinePassed && (proposal.status === "settled" || proposal.status === "awaiting_settlement" || proposal.status === "ordering") && (hasWinner || proposal.orderMemberCount > 0 || proposal.orders.length > 0);
         });
       case "create":
       default:
         return state.proposals.filter((proposal) => proposal.status === "proposing");
     }
-  }, [stage, state.proposals]);
+  }, [now, stage, state.proposals]);
   const sortedStageProposals = useMemo(() => {
     const items = [...stageProposals];
     return items.sort((left, right) => {
@@ -282,10 +297,23 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     });
   }, [stage, stageProposals, stageSort]);
 
-  const detail = useMemo(() => sortedStageProposals.find((proposal) => proposal.id === proposalId) || null, [proposalId, sortedStageProposals]);
+  const detail = useMemo(() => {
+    const staged = sortedStageProposals.find((proposal) => proposal.id === proposalId) || null;
+    if (staged) return staged;
+    if (detailProposal?.id === proposalId) return detailProposal;
+    return null;
+  }, [detailProposal, proposalId, sortedStageProposals]);
   const proposalDurationOptions = useMemo(() => durationOptions(state.governanceParams?.proposalDurationOptions, state.governanceParams?.proposalDurationMinutes ?? 1), [state.governanceParams?.proposalDurationMinutes, state.governanceParams?.proposalDurationOptions]);
   const voteDurationOptions = useMemo(() => durationOptions(state.governanceParams?.voteDurationOptions, state.governanceParams?.voteDurationMinutes ?? 1), [state.governanceParams?.voteDurationMinutes, state.governanceParams?.voteDurationOptions]);
   const orderingDurationOptions = useMemo(() => durationOptions(state.governanceParams?.orderingDurationOptions, state.governanceParams?.orderingDurationMinutes ?? 1), [state.governanceParams?.orderingDurationMinutes, state.governanceParams?.orderingDurationOptions]);
+
+  useEffect(() => {
+    if (!proposalId || !detail || stageRedirected.current) return;
+    const actualStage = stageForProposal(detail, now);
+    if (!actualStage || actualStage === stage || actualStage === "create") return;
+    stageRedirected.current = true;
+    router.replace(detailHref(actualStage, detail.id));
+  }, [detail, now, proposalId, router, stage]);
 
   async function handleCreateOrder() {
     if (!createDraft.title.trim() || !createDraft.groupId) return;
@@ -596,16 +624,14 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
       try {
         await refresh();
       } catch {
-        setMessage("付款與點餐已送出，但頁面同步較慢，請到完成送出訂單頁確認最新狀態。");
-        router.push(`/member/ordering/submitted/${detail.id}`);
+        setMessage("付款與點餐已送出，但頁面同步較慢，請重新整理後確認你的點餐內容。");
         return;
       }
-      setMessage("已送出點餐並完成付款。");
-      router.push(`/member/ordering/submitted/${detail.id}`);
+      setMessage("已完成本次點餐付款。截止前仍可繼續追加點餐，系統會在本頁顯示你目前已點的內容。");
     } catch (error) {
       setMessage(
         paymentSubmitted
-          ? "付款已送出，但點餐同步失敗。請先到完成送出訂單頁確認是否已建立，若未出現再重新整理後操作。"
+          ? "付款已送出，但點餐同步失敗。請先重新整理確認你目前已點的內容是否已更新；若未更新，再重新操作。"
           : toFriendlyWalletError(error, "付款未成功，請重新操作。")
       );
     } finally {
@@ -613,13 +639,15 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
     }
   }
 
-  async function handleConfirm(orderId: number) {
+  async function handleConfirm(orderIds: number[]) {
     setActionPending(true);
     setMessage("");
     try {
-      await confirmMemberOrder(orderId);
+      for (const orderId of orderIds) {
+        await confirmMemberOrder(orderId);
+      }
       await refresh();
-      setMessage("已確認接收訂單。");
+      setMessage("已確認接收整筆訂單。");
     } catch (error) {
       setMessage(toFriendlyWalletError(error, "確認收貨未成功，請重新操作。"));
     } finally {
@@ -764,7 +792,7 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
         <StageDetail
           stage={stage}
           proposal={detail!}
-          memberId={state.member?.id || 0}
+          member={state.member}
           merchants={state.merchants}
           merchantMenu={detail ? menus[detail.options.find((option) => option.id === detail.winnerOptionId)?.merchantId || ""] : undefined}
           now={now}
@@ -795,10 +823,11 @@ export function MemberOrderingWorkspace({ stage, proposalId }: { stage: Stage; p
           stage={stage}
           proposals={sortedStageProposals}
           now={now}
-          memberId={state.member?.id || 0}
+          member={state.member}
           sortBy={stageSort}
           setSortBy={setStageSort}
           onDelete={handleDeleteOrder}
+          onConfirm={handleConfirm}
         />
       )}
 
@@ -811,18 +840,20 @@ function StageList({
   stage,
   proposals,
   now,
-  memberId,
+  member,
   sortBy,
   setSortBy,
-  onDelete
+  onDelete,
+  onConfirm
 }: {
   stage: Stage;
   proposals: Proposal[];
   now: number;
-  memberId: number;
+  member: Member | null;
   sortBy: StageSortKey;
   setSortBy: (value: StageSortKey) => void;
   onDelete: (proposalId: number) => void;
+  onConfirm: (orderIds: number[]) => void;
 }) {
   const titleMap: Record<Stage, string> = {
     create: "建立訂單",
@@ -833,26 +864,41 @@ function StageList({
   };
 
   if (stage === "submitted") {
-    const orders = proposals
-      .flatMap((proposal) =>
-        safeArray(proposal.orders).map((order) => ({
-          ...order,
-          merchantName: order.merchantName || proposal.options.find((option) => option.id === proposal.winnerOptionId)?.merchantName || order.merchantId
-        }))
-      )
-      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
-
     return (
       <section className="space-y-4">
         <div className="meal-section-heading max-w-none">
           <p className="meal-kicker">Submitted orders</p>
           <h2>完成送出訂單</h2>
-          <p>顯示已送出的訂單清單。點進詳細資訊可查看目前狀態、狀態時間軸、餐點明細與訂購人資訊。</p>
+          <p>顯示整筆訂單清單。點進詳細資訊可查看整筆訂單目前狀態、狀態時間軸、所有參與成員的餐點明細與訂購人資訊。</p>
         </div>
-        {orders.length === 0 ? <div className="meal-panel p-8 text-sm text-muted-foreground">目前還沒有已送出的訂單。</div> : null}
-        {orders.map((order) => (
-          <OrderSummaryCard key={order.id} order={order} detailHref={`/member/orders/${order.id}`} />
-        ))}
+        {proposals.length === 0 ? <div className="meal-panel p-8 text-sm text-muted-foreground">目前還沒有已送出的訂單。</div> : null}
+        {proposals.map((proposal) => {
+          const aggregate = aggregateProposalOrder(proposal);
+          return (
+            <div key={proposal.id} className="meal-panel p-6">
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="space-y-2">
+                  <p className="text-xl font-bold">{proposal.title}</p>
+                  <p className="text-sm text-muted-foreground">訂單建立者：{proposalCreatorName(proposal)}</p>
+                  <p className="text-sm text-muted-foreground">獲選店家：{proposal.options.find((option) => option.id === proposal.winnerOptionId)?.merchantName || "尚未決定"}</p>
+                  <p className="text-sm text-muted-foreground">參與點餐人數：{aggregate.memberCount} 人 / 品項總數：{aggregate.itemCount} 項</p>
+                  <p className="text-sm text-muted-foreground">整筆訂單金額：{formatWeiFriendly(aggregate.amountWei)}</p>
+                  <p className="text-sm text-muted-foreground">目前狀態：{formatAggregateOrderStatus(aggregate.status)}</p>
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  <Button asChild variant="secondary">
+                    <Link href={`/member/ordering/submitted/${proposal.id}`}>詳細資訊</Link>
+                  </Button>
+                  {canCreatorConfirmReceipt(proposal, member) ? (
+                    <Button onClick={() => onConfirm(confirmableOrderIds(proposal))}>
+                      確認整筆接收
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </section>
     );
   }
@@ -883,6 +929,7 @@ function StageList({
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-2">
               <p className="text-xl font-bold">{proposal.title}</p>
+              <p className="text-sm text-muted-foreground">訂單建立者：{proposalCreatorName(proposal)}</p>
               <p className="text-sm text-muted-foreground">
                 已提店家數：{proposal.options.length}
               </p>
@@ -924,7 +971,7 @@ function StageList({
               <Link href={detailHref(stage, proposal.id)}>詳細資訊</Link>
             </Button>
           </div>
-          {canWithdrawProposal(proposal, memberId) ? (
+          {canWithdrawProposal(proposal, member?.id || 0) ? (
             <div className="mt-4">
               <Button variant="ghost" onClick={() => onDelete(proposal.id)}>撤回訂單</Button>
             </div>
@@ -938,7 +985,7 @@ function StageList({
 function StageDetail(props: {
   stage: Stage;
   proposal: Proposal;
-  memberId: number;
+  member: Member | null;
   merchants: Merchant[];
   merchantMenu?: Merchant;
   now: number;
@@ -960,18 +1007,21 @@ function StageDetail(props: {
   setOrderQuantity: (menuItemId: string, quantity: number) => void;
   onOrder: () => void;
   actionPending: boolean;
-  onConfirm: (orderId: number) => void;
+  onConfirm: (orderIds: number[]) => void;
   onDelete: (proposalId: number) => void;
   contractInfo: ContractInfo | null;
 }) {
   const { stage, proposal, merchants, merchantMenu, now, actionPending } = props;
+  const currentMemberId = Number(props.member?.id || 0);
   const winner = proposal.options.find((option) => option.id === proposal.winnerOptionId);
   const hasCurrentMemberVote =
     stage === "voting" &&
-    (proposal.currentVoteOptionId > 0 || safeArray(proposal.votes).some((vote) => vote.memberId === props.memberId));
+    (proposal.currentVoteOptionId > 0 || safeArray(proposal.votes).some((vote) => vote.memberId === currentMemberId));
   const selectedItems = merchantMenu?.menu.filter((item) => (props.orderItems[item.id] || 0) > 0) || [];
   const selectedPortions = selectedItems.reduce((sum, item) => sum + (props.orderItems[item.id] || 0), 0);
   const selectedSubtotalWei = selectedItems.reduce((total, item) => total + BigInt(item.priceWei) * BigInt(props.orderItems[item.id] || 0), 0n);
+  const currentMemberOrder = safeArray(proposal.orders).find((order) => order.memberId === currentMemberId) || null;
+  const aggregateOrder = aggregateProposalOrder(proposal);
   const detailHeading = stageDetailHeading(stage);
 
   return (
@@ -993,7 +1043,7 @@ function StageDetail(props: {
             <Link href={listHref(stage)}>回清單</Link>
           </Button>
         </div>
-        {canWithdrawProposal(proposal, props.memberId) ? (
+        {canWithdrawProposal(proposal, currentMemberId) ? (
           <div className="mt-4">
             <Button variant="ghost" onClick={() => props.onDelete(proposal.id)} disabled={actionPending}>
               撤回這筆訂單
@@ -1048,9 +1098,20 @@ function StageDetail(props: {
             <p className="meal-kicker">Vote summary</p>
             <h3 className="text-2xl font-extrabold">目前投票概況</h3>
             <div className="mt-6 grid gap-3 md:grid-cols-3">
-              <Stat label="提案店家數" value={`${proposal.options.length} 間`} />
-              <Stat label="參與投票數" value={`${safeArray(proposal.votes).length} 人`} />
+              <Stat label="目前提案店家數" value={`${proposal.options.length} 間`} />
+              <Stat label="目前參與投票數" value={`${safeArray(proposal.votes).length} 人`} />
               <Stat label="投票截止" value={formatDateTime(proposal.voteDeadline)} />
+            </div>
+            <p className="mt-4 text-sm text-muted-foreground">每間店的目前票數會在這裡即時更新；下方投票區只負責讓你選擇要投哪一間。</p>
+            <div className="mt-6 space-y-3">
+              {proposal.options.map((option) => (
+                <div key={option.id} className="rounded-[1.2rem] border border-border bg-background/70 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="font-semibold">{option.merchantName}</p>
+                    <p className="text-sm font-semibold text-[hsl(25_85%_36%)]">目前 {option.weightedVotes} 票</p>
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
           <section className="meal-panel p-8">
@@ -1075,7 +1136,7 @@ function StageDetail(props: {
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <p className="font-semibold">{option.merchantName}</p>
-                      <p className="mt-1 text-sm text-muted-foreground">目前 {option.weightedVotes} 票</p>
+                      <p className="mt-1 text-sm text-muted-foreground">確認後不可再修改投票對象</p>
                     </div>
                     {hasCurrentMemberVote ? (
                       <span className={`rounded-full px-3 py-2 text-xs font-bold ${
@@ -1109,6 +1170,22 @@ function StageDetail(props: {
           <section className="meal-panel p-8">
             <p className="meal-kicker">Menu</p>
             <h3 className="text-2xl font-extrabold">點餐</h3>
+            <p className="mt-3 text-sm text-muted-foreground">截止前你可以持續追加自己的點餐內容。這裡只會顯示你目前已點的項目，不會顯示其他成員的內容。</p>
+            {currentMemberOrder ? (
+              <div className="mt-6 rounded-[1.2rem] border border-[rgba(194,119,60,0.28)] bg-[rgba(194,119,60,0.08)] p-4">
+                <p className="meal-kicker">Your current order</p>
+                <p className="mt-2 text-sm text-muted-foreground">你目前已點的內容</p>
+                <div className="mt-4 space-y-2">
+                  {currentMemberOrder.items.map((item) => (
+                    <div key={`${currentMemberOrder.id}-${item.menuItemId}`} className="flex items-center justify-between gap-3 text-sm">
+                      <span>{item.name} x{item.quantity}</span>
+                      <span className="text-muted-foreground">{formatWeiFriendly(BigInt(item.priceWei) * BigInt(item.quantity))}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="mt-4 text-sm font-semibold">目前已付款總額：{formatWeiFriendly(currentMemberOrder.amountWei)}</p>
+              </div>
+            ) : null}
             <div className="mt-6 space-y-3">
               {safeArray(merchantMenu?.menu).map((item) => {
                 const quantity = props.orderItems[item.id] || 0;
@@ -1168,7 +1245,15 @@ function StageDetail(props: {
           </section>
           <section className="meal-panel p-8">
             <p className="meal-kicker">Orders</p>
-            <h3 className="text-2xl font-extrabold">已點餐成員</h3>
+            <h3 className="text-2xl font-extrabold">整筆訂單內容</h3>
+            <p className="mt-3 text-sm text-muted-foreground">以下會列出這筆整單中每位參與成員點了什麼項目。只有建立訂單的人可以確認整筆訂單已接收。</p>
+            <div className="mt-6 grid gap-3 md:grid-cols-4">
+              <Stat label="訂單建立者" value={proposalCreatorName(proposal)} />
+              <Stat label="參與點餐人數" value={`${aggregateOrder.memberCount} 人`} />
+              <Stat label="總金額" value={formatEth(aggregateOrder.amountWei)} />
+              <Stat label="整筆狀態" value={formatAggregateOrderStatus(aggregateOrder.status)} />
+              <Stat label="整體確認接收" value={aggregateOrder.status === "platform_paid" ? "已確認" : canCreatorConfirmReceipt(proposal, props.member) ? "待建立者確認" : aggregateOrder.status === "ready_for_payout" ? "已確認" : "未確認"} />
+            </div>
             <div className="mt-6 space-y-3">
               {proposal.orders.length === 0 ? <p className="text-sm text-muted-foreground">目前還沒有人完成點餐。</p> : null}
               {proposal.orders.map((order) => (
@@ -1178,13 +1263,28 @@ function StageDetail(props: {
                       <p className="font-semibold">{order.memberName}</p>
                       <p className="mt-1 text-sm text-muted-foreground">{formatOrderStatus(order.status)} · {formatWeiFriendly(order.amountWei)}</p>
                     </div>
-                    {order.status === "merchant_completed" ? (
-                      <Button onClick={() => props.onConfirm(order.id)} disabled={actionPending}>確認接收</Button>
-                    ) : null}
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    {order.items.map((item) => (
+                      <div key={`${order.id}-${item.menuItemId}`} className="flex items-center justify-between gap-3 text-sm">
+                        <span>{item.name} x{item.quantity}</span>
+                        <span className="text-muted-foreground">{formatWeiFriendly(BigInt(item.priceWei) * BigInt(item.quantity))}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
             </div>
+            {canCreatorConfirmReceipt(proposal, props.member) ? (
+              <div className="mt-6">
+                <Button
+                  onClick={() => props.onConfirm(confirmableOrderIds(proposal))}
+                  disabled={actionPending}
+                >
+                  確認整筆訂單接收
+                </Button>
+              </div>
+            ) : null}
           </section>
         </>
       ) : null}
@@ -1258,6 +1358,18 @@ function detailHref(stage: Stage, proposalId: number) {
   if (stage === "voting") return `/member/ordering/voting/${proposalId}`;
   if (stage === "ordering") return `/member/ordering/ordering/${proposalId}`;
   return `/member/ordering/submitted/${proposalId}`;
+}
+
+function stageForProposal(proposal: Proposal, now: number): Stage | null {
+  const proposalDeadline = new Date(proposal.proposalDeadline).getTime();
+  const voteDeadline = new Date(proposal.voteDeadline).getTime();
+  const orderDeadline = new Date(proposal.orderDeadline).getTime();
+  const hasWinner = proposal.options.some((option) => option.id === proposal.winnerOptionId);
+  if (Number.isFinite(proposalDeadline) && now < proposalDeadline) return "proposal";
+  if (Number.isFinite(voteDeadline) && now < voteDeadline) return "voting";
+  if (hasWinner && Number.isFinite(orderDeadline) && now < orderDeadline) return "ordering";
+  if (hasWinner || proposal.orderMemberCount > 0 || safeArray(proposal.orders).length > 0) return "submitted";
+  return null;
 }
 
 function listHref(stage: Stage) {
@@ -1443,6 +1555,86 @@ function formatOrderStatus(status: string) {
       return "店家已收款";
     default:
       return status;
+  }
+}
+
+function aggregateProposalOrder(proposal: Proposal) {
+  const orders = safeArray(proposal.orders);
+  const amountWei = orders.reduce((total, order) => total + BigInt(order.amountWei || "0"), 0n);
+  const itemCount = orders.reduce((total, order) => total + safeArray(order.items).reduce((sum, item) => sum + item.quantity, 0), 0);
+  const createdAt = orders.length ? new Date(Math.min(...orders.map((order) => new Date(order.createdAt).getTime()))).toISOString() : undefined;
+  const acceptedAt = latestTimeline(orders.map((order) => order.acceptedAt));
+  const completedAt = latestTimeline(orders.map((order) => order.completedAt));
+  const confirmedAt = latestTimeline(orders.map((order) => order.confirmedAt));
+  const paidOutAt = latestTimeline(orders.map((order) => order.paidOutAt));
+  return {
+    memberCount: orders.length,
+    itemCount,
+    amountWei,
+    status: aggregateOrderStatus(orders.map((order) => order.status)),
+    createdAt,
+    acceptedAt,
+    completedAt,
+    confirmedAt,
+    paidOutAt,
+  };
+}
+
+function confirmableOrderIds(proposal: Proposal) {
+  return safeArray(proposal.orders)
+    .filter((order) => order.status === "merchant_completed")
+    .map((order) => order.id);
+}
+
+function proposalCreatorName(proposal: Proposal) {
+  const name = String(proposal.createdByName || proposal.orders[0]?.createdByName || "").trim();
+  return name || "未知";
+}
+
+function canCreatorConfirmReceipt(proposal: Proposal, member: Member | null) {
+  const proposalCreatorId = Number(proposal.createdBy || proposal.orders[0]?.createdBy || 0);
+  const currentMemberId = Number(member?.id || 0);
+  const proposalCreatorName = String(proposal.createdByName || proposal.orders[0]?.createdByName || "").trim();
+  const currentMemberName = String(member?.displayName || "").trim();
+  const isCreator = proposalCreatorId > 0 && currentMemberId > 0
+    ? proposalCreatorId === currentMemberId
+    : proposalCreatorName !== "" && currentMemberName !== "" && proposalCreatorName === currentMemberName;
+  if (!isCreator) return false;
+  return confirmableOrderIds(proposal).length > 0;
+}
+
+function latestTimeline(values: Array<string | undefined>) {
+  const filtered = values.filter(Boolean) as string[];
+  if (!filtered.length) return undefined;
+  return filtered.sort((left, right) => new Date(right).getTime() - new Date(left).getTime())[0];
+}
+
+function aggregateOrderStatus(statuses: string[]) {
+  if (!statuses.length) return "payment_received";
+  if (statuses.some((status) => status === "payment_received" || status === "paid_local" || status === "paid_onchain")) return "payment_received";
+  if (statuses.some((status) => status === "merchant_accepted")) return "merchant_accepted";
+  if (statuses.some((status) => status === "merchant_completed")) return "merchant_completed";
+  if (statuses.some((status) => status === "ready_for_payout")) return "ready_for_payout";
+  if (statuses.every((status) => status === "platform_paid")) return "platform_paid";
+  return statuses[0];
+}
+
+function formatAggregateOrderStatus(status: string) {
+  switch (status) {
+    case "payment_received":
+    case "paid_local":
+    case "paid_onchain":
+      return "點餐階段進行中";
+    case "merchant_accepted":
+      return "店家已接單";
+    case "merchant_completed":
+      return "店家已完成製作";
+    case "ready_for_payout":
+      return "會員已確認，待平台撥款";
+    case "platform_paid":
+      return "已完成";
+    default:
+      return formatOrderStatus(status);
   }
 }
 
