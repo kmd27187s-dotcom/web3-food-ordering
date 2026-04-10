@@ -147,9 +147,9 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
             <LinkedStat label="進行中提案" value={`${activeProposalCount}`} href="/member/ongoing-orders" />
             <LinkedStat label="待結算訂單" value={`${submittedProposalCount}`} href="/member/ordering/submitted" />
             <LinkedStat label="歷史訂單" value={`${historyProposalCount}`} href="/member/orders" />
-            <LinkedStat label="提案券" value={`${state.member.proposalCouponCount} 張`} href="/records?tab=proposal-coupon" />
-            <LinkedStat label="投票券" value={`${state.member.voteCouponCount} 張`} href="/records?tab=vote-coupon" />
-            <LinkedStat label="建立訂單券" value={`${state.member.createOrderCouponCount} 張`} href="/records?tab=create-order-coupon" />
+            <LinkedStat label="提案券" value={`${state.member.proposalTicketCount} 張`} href="/records?tab=proposal-coupon" />
+            <LinkedStat label="投票券" value={`${state.member.voteTicketCount} 張`} href="/records?tab=vote-coupon" />
+            <LinkedStat label="建立訂單券" value={`${state.member.createOrderTicketCount} 張`} href="/records?tab=create-order-coupon" />
             <LinkedStat label="邀請碼" value={state.member.registrationInviteCode || "尚未產生"} href="/records?tab=invite" />
           </div>
         </div>
@@ -158,9 +158,9 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
           <p className="meal-kicker">Status</p>
           <div className="mt-5 grid gap-4">
             <LinkedStat label="訂閱狀態" value={state.member.subscriptionActive ? "已啟用" : "尚未啟用"} href="/member/subscription" />
-            <Stat label="可領取提案券" value={`${state.member.claimableProposalCoupons} 張`} />
-            <Stat label="可領取投票券" value={`${state.member.claimableVoteCoupons} 張`} />
-            <Stat label="可領取建立訂單券" value={`${state.member.claimableCreateOrderCoupons} 張`} />
+            <Stat label="可領取提案券" value={`${state.member.claimableProposalTickets} 張`} />
+            <Stat label="可領取投票券" value={`${state.member.claimableVoteTickets} 張`} />
+            <Stat label="可領取建立訂單券" value={`${state.member.claimableCreateOrderTickets} 張`} />
             <Stat
               label="訂閱到期日"
               value={state.member.subscriptionExpiresAt ? new Date(state.member.subscriptionExpiresAt).toLocaleString("zh-TW") : "尚未啟用"}
@@ -169,7 +169,7 @@ export function MemberDashboard({ openSubscribe = false }: { openSubscribe?: boo
           <button
             type="button"
             onClick={handleClaimTickets}
-            disabled={pending || (state.member.claimableProposalCoupons <= 0 && state.member.claimableVoteCoupons <= 0 && state.member.claimableCreateOrderCoupons <= 0)}
+            disabled={pending || (state.member.claimableProposalTickets <= 0 && state.member.claimableVoteTickets <= 0 && state.member.claimableCreateOrderTickets <= 0)}
             className="mt-5 inline-flex items-center gap-2 rounded-full border border-border bg-background/80 px-4 py-2 text-sm font-semibold text-primary transition hover:border-primary/40 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Gift className="h-4 w-4" />

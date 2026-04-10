@@ -707,9 +707,9 @@ function StageDetail(props: {
         <>
           <section className="meal-panel p-8">
             <p className="meal-kicker">Vote summary</p>
-            <h3 className="text-2xl font-extrabold">投票總覽</h3>
+            <h3 className="text-2xl font-extrabold">目前投票概況</h3>
             <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              <Stat label="提案選項數" value={`${proposal.options.length} 家`} />
+              <Stat label="提案店家數" value={`${proposal.options.length} 間`} />
               <Stat label="目前總票重" value={`${totalVoteWeight} 票`} />
               <Stat label="已投成員數" value={`${safeArray(proposal.votes).length} 人`} />
               <Stat label="投票截止" value={formatDateTime(proposal.voteDeadline)} />
@@ -738,9 +738,9 @@ function StageDetail(props: {
           </section>
           <section className="meal-panel p-8">
             <p className="meal-kicker">Vote</p>
-            <h3 className="text-2xl font-extrabold">投票與票重</h3>
+            <h3 className="text-2xl font-extrabold">投票給店家</h3>
             <div className="mt-6 space-y-4">
-              <Field label="本次投票投入 Token（使用投票券時免填）">
+              <Field label="這輪投票的 token 權重 (必填)">
                 <div className="flex gap-3">
                   <input type="number" min={1} className="meal-field" value={props.voteTokens} onChange={(event) => props.setVoteTokens(event.target.value)} disabled={props.useVoteTicket} />
                   <Button variant="secondary" onClick={props.onVoteQuote}>試算</Button>
@@ -749,7 +749,7 @@ function StageDetail(props: {
               </Field>
               <label className="flex items-center gap-2 text-sm text-muted-foreground">
                 <input type="checkbox" checked={props.useVoteTicket} onChange={(event) => props.setUseVoteTicket(event.target.checked)} />
-                使用投票券後會以 1 張投票券折抵 1 票，付款會顯示 0 Token，但票重仍會正常增加。
+                使用投票券。截止前都可抽回更換，最後一次投票為準。
               </label>
               {proposal.options.map((option) => (
                 <div key={option.id} className="rounded-[1.2rem] border border-border bg-background/70 p-4">
